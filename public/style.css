@@ -1,0 +1,29 @@
+body
+{ margin: 0; font-family: Arial; }
+.container
+{ display: flex; height: 100vh; }
+.users
+{ width: 200px; background: #eee; padding: 10px; }
+.chat
+{ flex: 1; display: flex; flex-direction: column; }
+.messages
+{ flex: 1; padding: 10px; overflow-y: auto; }
+.msg
+{ max-width: 300px; padding: 8px; border-radius: 10px; margin: 5px; }
+.me
+{ background: #0d8bff; color: white; margin-left: auto; }
+.him
+{ background: #ccc; }
+.input
+{ display: flex; }
+input
+{ flex: 1; padding: 10px; }
+button
+{ width: 100px; }
+
+.login-body
+{ display:flex; justify-content:center; align-items:center; height:100vh; background:#0d8bff; }
+.login-box
+{ background:white; padding:30px; border-radius:10px; width:250px; text-align:center; }
+.login-box input
+{ width:100%; margin:5px 0; padding:10px; }

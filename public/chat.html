@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Messenger</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+    <div class="users" id="users"></div>
+
+    <div class="chat">
+        <div id="messages" class="messages"></div>
+        <div class="input">
+            <input type="text" id="text" placeholder="Сообщение...">
+            <button onclick="send()">Отправить</button>
+        </div>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="chat.js"></script>
+</body>
+</html>
