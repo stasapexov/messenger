@@ -17,6 +17,7 @@ const io = new Server(server, {
 });
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 250);
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
@@ -1490,6 +1491,6 @@ app.use((error, req, res, next) => {
     handleError(res, error);
 });
 
-server.listen(PORT, () => {
-    console.log(`Messenger server started on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+    console.log(`Messenger server started on http://${HOST}:${PORT}`);
 });

@@ -46,6 +46,7 @@ npm start
 
 ```bash
 PORT=3000
+HOST=0.0.0.0
 ADMIN_LOGIN=admin
 ADMIN_PASSWORD=strong-password
 ADMIN_NAME=Admin
@@ -118,6 +119,7 @@ EACCES: permission denied, mkdir '/app/data'
 обновите приложение до актуального коммита и задайте постоянные пути для данных, если App Platform подключает persistent storage:
 
 ```env
+HOST=0.0.0.0
 DATA_DIR=/path/to/persistent/data
 STORAGE_DIR=/path/to/persistent/storage
 FILE_DIR=/path/to/persistent/storage/files
