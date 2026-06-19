@@ -6,9 +6,17 @@ const state = {
     chats: [],
     selectedChat: null,
     selectedAttachment: null,
+    replyToMessage: null,
+    actionMessage: null,
+    forwardingMessage: null,
     editingNewsId: null,
-    recorder: null,
-    recordingChunks: [],
+    voiceStream: null,
+    voiceContext: null,
+    voiceSource: null,
+    voiceProcessor: null,
+    voiceGain: null,
+    voiceSamples: [],
+    voiceSampleRate: 44100,
 };
 
 const els = {
@@ -16,11 +24,16 @@ const els = {
     headerName: document.getElementById("headerName"),
     headerTag: document.getElementById("headerTag"),
     logoutButton: document.getElementById("logoutButton"),
+    chatLayout: document.querySelector(".chat-layout"),
     chatList: document.getElementById("chatList"),
     refreshChatsButton: document.getElementById("refreshChatsButton"),
     openGroupPanelButton: document.getElementById("openGroupPanelButton"),
+    closeGroupPanelButton: document.getElementById("closeGroupPanelButton"),
+    cancelGroupButton: document.getElementById("cancelGroupButton"),
+    groupScrim: document.getElementById("groupScrim"),
     groupForm: document.getElementById("groupForm"),
     groupMembers: document.getElementById("groupMembers"),
+    groupError: document.getElementById("groupError"),
     emptyChat: document.getElementById("emptyChat"),
     chatRoom: document.getElementById("chatRoom"),
     closeChatButton: document.getElementById("closeChatButton"),
@@ -28,6 +41,9 @@ const els = {
     chatTitle: document.getElementById("chatTitle"),
     chatSubtitle: document.getElementById("chatSubtitle"),
     messages: document.getElementById("messages"),
+    replyPreview: document.getElementById("replyPreview"),
+    replyPreviewText: document.getElementById("replyPreviewText"),
+    clearReplyButton: document.getElementById("clearReplyButton"),
     messageForm: document.getElementById("messageForm"),
     messageText: document.getElementById("messageText"),
     messageFile: document.getElementById("messageFile"),
@@ -53,6 +69,13 @@ const els = {
     inviteList: document.getElementById("inviteList"),
     adminUsers: document.getElementById("adminUsers"),
     profilePanel: document.getElementById("profilePanel"),
+    messageActionScrim: document.getElementById("messageActionScrim"),
+    messageActionSheet: document.getElementById("messageActionSheet"),
+    messageActionTitle: document.getElementById("messageActionTitle"),
+    forwardScrim: document.getElementById("forwardScrim"),
+    forwardPanel: document.getElementById("forwardPanel"),
+    closeForwardButton: document.getElementById("closeForwardButton"),
+    forwardTargets: document.getElementById("forwardTargets"),
 };
 
 async function api(path, options = {}) {
@@ -108,6 +131,11 @@ function fileSize(bytes) {
         index += 1;
     }
     return `${value.toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+
+function messageSnippet(message, fallback = "Сообщение") {
+    const text = message?.text || message?.attachment?.originalName || "";
+    return text ? text.slice(0, 120) : fallback;
 }
 
 function avatarContent(item) {
@@ -202,11 +230,32 @@ function renderGroupMembers() {
     renderCheckboxes(els.groupMembers, state.users);
 }
 
+function openGroupForm() {
+    els.groupError.textContent = "";
+    renderGroupMembers();
+    els.groupScrim.classList.remove("hidden");
+    els.groupForm.classList.remove("hidden");
+    els.groupForm.elements.title.focus();
+}
+
+function closeGroupForm({ reset = true } = {}) {
+    if (reset) els.groupForm.reset();
+    els.groupError.textContent = "";
+    els.groupScrim.classList.add("hidden");
+    els.groupForm.classList.add("hidden");
+}
+
+function setChatOpen(isOpen) {
+    els.chatLayout.classList.toggle("chat-open", Boolean(isOpen));
+}
+
 async function selectChat(chatId) {
     const chat = state.chats.find((item) => item.id === chatId) || (await api("/chats")).find((item) => item.id === chatId);
     if (!chat) return;
 
     state.selectedChat = chat;
+    clearReplyToMessage();
+    setChatOpen(true);
     socket.emit("joinChat", chat.id);
     renderChats();
     els.emptyChat.classList.add("hidden");
@@ -234,34 +283,199 @@ function addMessage(message) {
     const item = document.createElement("article");
     item.className = `msg ${isMe ? "me" : "him"}`;
     item.dataset.id = message.id;
+    if (!message.deletedForAll) {
+        item.tabIndex = 0;
+        item.setAttribute("role", "button");
+        item.setAttribute("aria-label", "Действия с сообщением");
+    }
 
     const sender = state.selectedChat?.type === "group" && !isMe ? `<strong class="msg-sender">${escapeHtml(message.sender?.name || "")}</strong>` : "";
+    const reply = message.replyTo
+        ? `<button class="reply-quote" type="button" data-reply-id="${escapeHtml(message.replyTo.id)}"><strong>${escapeHtml(message.replyTo.sender?.name || "Пользователь")}</strong><span>${escapeHtml(message.replyTo.text)}</span></button>`
+        : "";
     const body = message.deletedForAll
         ? `<div class="msg-text muted">Сообщение удалено</div>`
         : `
+            ${reply}
             ${message.text ? `<div class="msg-text">${escapeHtml(message.text)}</div>` : ""}
             ${message.attachment ? attachmentHtml(message.attachment, message.kind) : ""}
         `;
-    const actions = message.deletedForAll
-        ? ""
-        : `<div class="msg-actions">
-            ${message.canEdit ? '<button type="button" data-action="edit">Изм.</button>' : ""}
-            <button type="button" data-action="delete-me">У себя</button>
-            ${message.canDeleteAll ? '<button type="button" data-action="delete-all">У всех</button>' : ""}
-        </div>`;
 
     item.innerHTML = `
         ${sender}
         ${body}
         <time>${formatTime(message.createdAt)}${message.editedAt ? " · изм." : ""}</time>
-        ${actions}
     `;
 
-    item.querySelector('[data-action="edit"]')?.addEventListener("click", () => editMessage(message));
-    item.querySelector('[data-action="delete-me"]')?.addEventListener("click", () => deleteMessage(message.id, "me"));
-    item.querySelector('[data-action="delete-all"]')?.addEventListener("click", () => deleteMessage(message.id, "all"));
+    item.querySelector(".reply-quote")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        scrollToMessage(event.currentTarget.dataset.replyId);
+    });
+
+    if (!message.deletedForAll) bindMessageActions(item, message);
 
     els.messages.appendChild(item);
+    setupMediaPlayers(item);
+}
+
+function isMessageControl(target) {
+    return Boolean(target.closest("a, button, input, audio, video, label"));
+}
+
+function bindMessageActions(item, message) {
+    let longPress = null;
+    let longPressOpened = false;
+
+    item.addEventListener("pointerdown", (event) => {
+        if (isMessageControl(event.target)) return;
+        longPressOpened = false;
+        longPress = window.setTimeout(() => {
+            longPressOpened = true;
+            openMessageActions(message);
+        }, 460);
+    });
+
+    ["pointerup", "pointerleave", "pointercancel"].forEach((eventName) => {
+        item.addEventListener(eventName, () => {
+            if (longPress) window.clearTimeout(longPress);
+        });
+    });
+
+    item.addEventListener("click", (event) => {
+        if (isMessageControl(event.target)) return;
+        if (longPressOpened) {
+            longPressOpened = false;
+            return;
+        }
+        openMessageActions(message);
+    });
+
+    item.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openMessageActions(message);
+    });
+
+    item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openMessageActions(message);
+        }
+    });
+}
+
+function scrollToMessage(messageId) {
+    const node = els.messages.querySelector(`[data-id="${CSS.escape(messageId)}"]`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.classList.add("msg-highlight");
+    window.setTimeout(() => node.classList.remove("msg-highlight"), 1200);
+}
+
+function openMessageActions(message) {
+    state.actionMessage = message;
+    els.messageActionTitle.textContent = messageSnippet(message);
+    els.messageActionSheet.querySelector('[data-message-action="edit"]').classList.toggle("hidden", !message.canEdit);
+    els.messageActionSheet.querySelector('[data-message-action="delete-all"]').classList.toggle("hidden", !message.canDeleteAll);
+    els.messageActionScrim.classList.remove("hidden");
+    els.messageActionSheet.classList.remove("hidden");
+}
+
+function closeMessageActions() {
+    state.actionMessage = null;
+    els.messageActionScrim.classList.add("hidden");
+    els.messageActionSheet.classList.add("hidden");
+}
+
+function setReplyToMessage(message) {
+    state.replyToMessage = message;
+    els.replyPreviewText.textContent = `Ответ на: "${messageSnippet(message)}"`;
+    els.replyPreview.classList.remove("hidden");
+    els.messageText.focus();
+}
+
+function clearReplyToMessage() {
+    state.replyToMessage = null;
+    els.replyPreview.classList.add("hidden");
+    els.replyPreviewText.textContent = "";
+}
+
+function closeForwardPanel() {
+    state.forwardingMessage = null;
+    els.forwardScrim.classList.add("hidden");
+    els.forwardPanel.classList.add("hidden");
+}
+
+function renderForwardTargets() {
+    els.forwardTargets.innerHTML = "";
+    if (!state.users.length) {
+        els.forwardTargets.innerHTML = `<div class="empty-state compact">Пользователи не найдены</div>`;
+        return;
+    }
+
+    state.users.forEach((user) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "forward-target";
+        button.dataset.userId = user.id;
+        button.innerHTML = `
+            <span class="avatar-button small">${avatarContent(user)}</span>
+            <span>
+                <strong>${escapeHtml(user.name)}</strong>
+                <small>@${escapeHtml(user.tag)}</small>
+            </span>
+        `;
+        els.forwardTargets.appendChild(button);
+    });
+}
+
+async function openForwardPanel(message) {
+    state.forwardingMessage = message;
+    if (!state.users.length) await loadUsers();
+    renderForwardTargets();
+    els.forwardScrim.classList.remove("hidden");
+    els.forwardPanel.classList.remove("hidden");
+}
+
+async function forwardMessageToUser(userId) {
+    if (!state.forwardingMessage) return;
+    const result = await api(`/messages/${state.forwardingMessage.id}/forward`, {
+        method: "POST",
+        body: { targetUserId: userId },
+    });
+    closeForwardPanel();
+    await loadChats();
+    switchView("viewChats");
+    if (result.chat?.id) await selectChat(result.chat.id);
+}
+
+async function handleMessageAction(action) {
+    const message = state.actionMessage;
+    if (!message || action === "cancel") {
+        closeMessageActions();
+        return;
+    }
+
+    closeMessageActions();
+
+    if (action === "reply") {
+        setReplyToMessage(message);
+        return;
+    }
+    if (action === "forward") {
+        openForwardPanel(message);
+        return;
+    }
+    if (action === "edit") {
+        await editMessage(message);
+        return;
+    }
+    if (action === "delete-me") {
+        await deleteMessage(message.id, "me");
+        return;
+    }
+    if (action === "delete-all") {
+        await deleteMessage(message.id, "all");
+    }
 }
 
 function attachmentHtml(attachment, kind) {
@@ -269,12 +483,26 @@ function attachmentHtml(attachment, kind) {
         return `<a class="attachment image" href="${attachment.url}" target="_blank" rel="noreferrer"><img src="${attachment.url}" alt=""><span>${escapeHtml(attachment.originalName)}</span></a>`;
     }
     if (attachment.type === "video") {
-        return `<div class="attachment"><video src="${attachment.url}" controls></video><a href="${attachment.url}?download=1">${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</a></div>`;
+        return `<div class="attachment media-attachment"><div class="media-player video-player"><video src="${attachment.url}" controls preload="metadata" playsinline></video></div><a class="attachment-link" href="${attachment.url}?download=1">${escapeHtml(attachment.originalName)} - ${fileSize(attachment.size)}</a></div>`;
     }
     if (attachment.type === "audio" || kind === "voice") {
-        return `<div class="attachment"><audio src="${attachment.url}" controls></audio><a href="${attachment.url}?download=1">${kind === "voice" ? "Голосовое" : escapeHtml(attachment.originalName)}</a></div>`;
+        const title = kind === "voice" ? "Голосовое" : escapeHtml(attachment.originalName);
+        return `<div class="attachment media-attachment"><div class="media-player audio-player"><audio class="media-native" src="${attachment.url}" controls preload="metadata" playsinline></audio></div><a class="attachment-link" href="${attachment.url}?download=1">${title}${attachment.size ? ` - ${fileSize(attachment.size)}` : ""}</a></div>`;
     }
     return `<a class="attachment file" href="${attachment.url}?download=1"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a>`;
+}
+
+function pauseOtherMedia(currentMedia) {
+    document.querySelectorAll(".media-player audio, .media-player video").forEach((media) => {
+        if (media !== currentMedia && !media.paused) media.pause();
+    });
+}
+
+function setupMediaPlayers(root = document) {
+    root.querySelectorAll(".media-player audio:not([data-ready]), .media-player video:not([data-ready])").forEach((media) => {
+        media.dataset.ready = "1";
+        media.addEventListener("play", () => pauseOtherMedia(media));
+    });
 }
 
 async function uploadSelectedAttachment() {
@@ -305,6 +533,7 @@ async function sendMessage(event) {
             text,
             fileId: uploaded?.id || null,
             kind: state.selectedAttachment?.kind || (uploaded ? "file" : "text"),
+            replyToMessageId: state.replyToMessage?.id || null,
         };
 
         socket.emit("sendMessage", payload, (response) => {
@@ -314,6 +543,7 @@ async function sendMessage(event) {
         els.messageText.value = "";
         els.messageFile.value = "";
         setAttachment(null);
+        clearReplyToMessage();
     } catch (error) {
         alert(error.message);
     }
@@ -337,13 +567,33 @@ async function deleteMessage(messageId, mode) {
 
 async function createGroup(event) {
     event.preventDefault();
-    const title = new FormData(els.groupForm).get("title");
+    const submitButton = els.groupForm.querySelector("button[type='submit']");
+    const title = String(new FormData(els.groupForm).get("title") || "").trim();
     const memberIds = checkedValues(els.groupMembers);
-    const chat = await api("/chats/group", { method: "POST", body: { title, memberIds } });
-    els.groupForm.reset();
-    els.groupForm.classList.add("hidden");
-    await loadChats();
-    await selectChat(chat.id);
+
+    if (title.length < 2) {
+        els.groupError.textContent = "Введите название группы";
+        els.groupForm.elements.title.focus();
+        return;
+    }
+
+    if (!memberIds.length) {
+        els.groupError.textContent = "Выберите хотя бы одного участника";
+        return;
+    }
+
+    try {
+        submitButton.disabled = true;
+        els.groupError.textContent = "";
+        const chat = await api("/chats/group", { method: "POST", body: { title, memberIds } });
+        closeGroupForm();
+        await loadChats();
+        await selectChat(chat.id);
+    } catch (error) {
+        els.groupError.textContent = error.message;
+    } finally {
+        submitButton.disabled = false;
+    }
 }
 
 function renderPeople() {
@@ -568,26 +818,110 @@ async function enablePush() {
     alert("Уведомления включены");
 }
 
+function mergeVoiceSamples(chunks) {
+    const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const result = new Float32Array(length);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+        result.set(chunk, offset);
+        offset += chunk.length;
+    });
+    return result;
+}
+
+function writeAscii(view, offset, value) {
+    for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+    }
+}
+
+function encodeWav(samples, sampleRate) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let index = 0; index < samples.length; index += 1, offset += 2) {
+        const sample = Math.max(-1, Math.min(1, samples[index]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+
+    return new Blob([view], { type: "audio/wav" });
+}
+
+async function stopVoiceRecording() {
+    const samples = mergeVoiceSamples(state.voiceSamples);
+    const sampleRate = state.voiceSampleRate;
+
+    state.voiceProcessor?.disconnect();
+    state.voiceSource?.disconnect();
+    state.voiceGain?.disconnect();
+    state.voiceStream?.getTracks().forEach((track) => track.stop());
+    await state.voiceContext?.close().catch(() => {});
+
+    state.voiceStream = null;
+    state.voiceContext = null;
+    state.voiceSource = null;
+    state.voiceProcessor = null;
+    state.voiceGain = null;
+    state.voiceSamples = [];
+    els.voiceButton.classList.remove("recording");
+
+    if (!samples.length) return;
+
+    const blob = encodeWav(samples, sampleRate);
+    const file = new File([blob], `voice-${Date.now()}.wav`, { type: "audio/wav" });
+    setAttachment(file, "voice");
+}
+
 async function startVoiceRecording() {
-    if (state.recorder && state.recorder.state === "recording") {
-        state.recorder.stop();
+    if (state.voiceContext) {
+        await stopVoiceRecording();
         return;
     }
 
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+        throw new Error("Браузер не поддерживает запись голоса");
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    state.recordingChunks = [];
-    state.recorder = new MediaRecorder(stream);
-    state.recorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size) state.recordingChunks.push(event.data);
-    });
-    state.recorder.addEventListener("stop", () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(state.recordingChunks, { type: "audio/webm" });
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" });
-        setAttachment(file, "voice");
-        els.voiceButton.classList.remove("recording");
-    });
-    state.recorder.start();
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const gain = context.createGain();
+    gain.gain.value = 0;
+
+    state.voiceStream = stream;
+    state.voiceContext = context;
+    state.voiceSource = source;
+    state.voiceProcessor = processor;
+    state.voiceGain = gain;
+    state.voiceSamples = [];
+    state.voiceSampleRate = context.sampleRate;
+
+    processor.onaudioprocess = (event) => {
+        state.voiceSamples.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    };
+
+    source.connect(processor);
+    processor.connect(gain);
+    gain.connect(context.destination);
+    await context.resume();
+
     els.voiceButton.classList.add("recording");
 }
 
@@ -600,10 +934,29 @@ document.querySelectorAll(".nav-button").forEach((button) => button.addEventList
 els.headerAvatar.addEventListener("click", () => switchView("viewProfile"));
 els.logoutButton.addEventListener("click", logout);
 els.refreshChatsButton.addEventListener("click", loadChats);
-els.openGroupPanelButton.addEventListener("click", () => els.groupForm.classList.toggle("hidden"));
+els.openGroupPanelButton.addEventListener("click", openGroupForm);
+els.closeGroupPanelButton.addEventListener("click", () => closeGroupForm());
+els.cancelGroupButton.addEventListener("click", () => closeGroupForm());
+els.groupScrim.addEventListener("click", () => closeGroupForm());
 els.groupForm.addEventListener("submit", createGroup);
+els.messageActionScrim.addEventListener("click", closeMessageActions);
+els.messageActionSheet.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-message-action]");
+    if (!button) return;
+    handleMessageAction(button.dataset.messageAction).catch((error) => alert(error.message));
+});
+els.clearReplyButton.addEventListener("click", clearReplyToMessage);
+els.forwardScrim.addEventListener("click", closeForwardPanel);
+els.closeForwardButton.addEventListener("click", closeForwardPanel);
+els.forwardTargets.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-user-id]");
+    if (!target) return;
+    forwardMessageToUser(target.dataset.userId).catch((error) => alert(error.message));
+});
 els.closeChatButton.addEventListener("click", () => {
     state.selectedChat = null;
+    clearReplyToMessage();
+    setChatOpen(false);
     els.chatRoom.classList.add("hidden");
     els.emptyChat.classList.remove("hidden");
     renderChats();
@@ -630,6 +983,11 @@ els.newsVisibility.addEventListener("change", () => els.newsAudience.classList.t
 els.newsForm.addEventListener("submit", saveNews);
 els.cancelNewsEdit.addEventListener("click", resetNewsForm);
 els.inviteForm.addEventListener("submit", createInvite);
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.groupForm.classList.contains("hidden")) closeGroupForm();
+    if (event.key === "Escape" && !els.messageActionSheet.classList.contains("hidden")) closeMessageActions();
+    if (event.key === "Escape" && !els.forwardPanel.classList.contains("hidden")) closeForwardPanel();
+});
 
 socket.on("connect_error", () => {
     window.location = "index.html";
@@ -643,19 +1001,17 @@ socket.on("newMessage", async (message) => {
     await loadChats();
 });
 
-socket.on("messageUpdated", (message) => {
-    const node = els.messages.querySelector(`[data-id="${message.id}"]`);
-    if (!node) return;
-    node.remove();
-    addMessage(message);
+socket.on("messageUpdated", async (message) => {
+    if (state.selectedChat?.id === message.chatId) {
+        await loadMessages();
+    }
 });
 
-socket.on("messageDeleted", ({ id, mode }) => {
+socket.on("messageDeleted", async ({ id, mode }) => {
     const node = els.messages.querySelector(`[data-id="${id}"]`);
     if (!node) return;
     if (mode === "all") {
-        node.querySelector(".msg-text")?.remove();
-        node.insertAdjacentHTML("afterbegin", `<div class="msg-text muted">Сообщение удалено</div>`);
+        await loadMessages();
     }
 });
 

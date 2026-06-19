@@ -406,13 +406,15 @@ function createSchema() {
             id TEXT PRIMARY KEY,
             chat_id TEXT NOT NULL,
             sender_id TEXT NOT NULL,
+            reply_to_message_id TEXT,
             body TEXT,
             kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'file', 'voice')),
             deleted_for_all INTEGER NOT NULL DEFAULT 0,
             edited_at TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (reply_to_message_id) REFERENCES messages(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS message_attachments (
@@ -497,9 +499,18 @@ function createSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id);
         CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id);
         CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
     `);
+}
+
+function migrateSchema() {
+    const messageColumns = all("PRAGMA table_info(messages)");
+    if (!messageColumns.some((column) => column.name === "reply_to_message_id")) {
+        run("ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT");
+    }
+    run("CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id)");
 }
 
 function getSetting(key) {
@@ -713,6 +724,30 @@ function attachmentForMessage(messageId) {
     return publicFile(file);
 }
 
+function replyForMessage(message, currentUserId) {
+    if (!message.reply_to_message_id || message.deleted_for_all) return null;
+
+    const reply = get("SELECT * FROM messages WHERE id = ?", [message.reply_to_message_id]);
+    if (!reply || reply.chat_id !== message.chat_id || reply.deleted_for_all) return null;
+
+    const deletedForMe = get(
+        "SELECT 1 FROM message_deletions WHERE message_id = ? AND user_id = ?",
+        [reply.id, currentUserId]
+    );
+    if (deletedForMe) return null;
+
+    const sender = getUserById(reply.sender_id);
+    const attachment = attachmentForMessage(reply.id);
+    const text = reply.body || attachment?.originalName || "Вложение";
+
+    return {
+        id: reply.id,
+        sender: publicUser(sender),
+        senderId: reply.sender_id,
+        text: String(text).slice(0, 180),
+    };
+}
+
 function messageForClient(message, currentUserId, options = {}) {
     const sender = getUserById(message.sender_id);
     const deletedForMe = get(
@@ -736,6 +771,7 @@ function messageForClient(message, currentUserId, options = {}) {
         text: message.deleted_for_all ? "" : message.body || "",
         kind: message.deleted_for_all ? "deleted" : message.kind,
         attachment: message.deleted_for_all ? null : attachmentForMessage(message.id),
+        replyTo: replyForMessage(message, currentUserId),
         deletedForAll: Boolean(message.deleted_for_all),
         canEdit: currentUserId === message.sender_id && !message.deleted_for_all,
         canDeleteAll,
@@ -744,12 +780,13 @@ function messageForClient(message, currentUserId, options = {}) {
     };
 }
 
-function insertMessage(user, chatId, payload) {
+function insertMessage(user, chatId, payload, options = {}) {
     requireChatMember(chatId, user.id);
 
     const text = String(payload.text || "").trim().slice(0, 4000);
     const fileId = payload.fileId || null;
     const kind = payload.kind === "voice" ? "voice" : fileId ? "file" : "text";
+    const replyToMessageId = payload.replyToMessageId || null;
 
     if (!text && !fileId) {
         const error = new Error("Нельзя отправить пустое сообщение");
@@ -759,9 +796,19 @@ function insertMessage(user, chatId, payload) {
 
     if (fileId) {
         const file = get("SELECT * FROM files WHERE id = ?", [fileId]);
-        if (!file || file.owner_id !== user.id) {
+        const hasFileAccess = options.allowAccessibleFile ? canAccessFile(user.id, fileId) : file?.owner_id === user.id;
+        if (!file || !hasFileAccess) {
             const error = new Error("Файл не найден");
             error.status = 404;
+            throw error;
+        }
+    }
+
+    if (replyToMessageId) {
+        const reply = get("SELECT * FROM messages WHERE id = ?", [replyToMessageId]);
+        if (!reply || reply.chat_id !== chatId || reply.deleted_for_all) {
+            const error = new Error("Нельзя ответить на это сообщение");
+            error.status = 400;
             throw error;
         }
     }
@@ -770,9 +817,9 @@ function insertMessage(user, chatId, payload) {
         const messageId = makeId("msg");
         const createdAt = now();
         run(
-            `INSERT INTO messages (id, chat_id, sender_id, body, kind, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [messageId, chatId, user.id, text, kind, createdAt]
+            `INSERT INTO messages (id, chat_id, sender_id, reply_to_message_id, body, kind, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [messageId, chatId, user.id, replyToMessageId, text, kind, createdAt]
         );
 
         if (fileId) {
@@ -964,6 +1011,7 @@ function allowLoginAttempt(key) {
 }
 
 createSchema();
+migrateSchema();
 ensureVapidKeys();
 ensureBootstrapAdmin();
 ensureInitialInvite();
@@ -1212,8 +1260,11 @@ app.post("/chats/direct", requireUser, (req, res) => {
 app.post("/chats/group", requireUser, (req, res) => {
     try {
         const title = String(req.body.title || "").trim().slice(0, 80);
-        const memberIds = [...new Set(jsonList(req.body.memberIds).concat(req.currentUser.id))];
+        const requestedMemberIds = [...new Set(jsonList(req.body.memberIds).filter((id) => id !== req.currentUser.id))];
+        const validMemberIds = requestedMemberIds.filter((id) => Boolean(getUserById(id)));
+        const memberIds = [...new Set(validMemberIds.concat(req.currentUser.id))];
         if (title.length < 2) return res.status(400).json({ error: "Введите название группы" });
+        if (!validMemberIds.length) return res.status(400).json({ error: "Выберите участников группы" });
 
         const chat = tx(() => {
             const chatId = makeId("chat");
@@ -1351,6 +1402,49 @@ app.delete("/messages/:id", requireUser, (req, res) => {
         }
 
         res.json({ success: true });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.post("/messages/:id/forward", requireUser, (req, res) => {
+    try {
+        const source = get("SELECT * FROM messages WHERE id = ?", [req.params.id]);
+        if (!source) return res.status(404).json({ error: "Сообщение не найдено" });
+        requireChatMember(source.chat_id, req.currentUser.id);
+        if (source.deleted_for_all) return res.status(400).json({ error: "Нельзя переслать удалённое сообщение" });
+
+        const deletedForMe = get(
+            "SELECT 1 FROM message_deletions WHERE message_id = ? AND user_id = ?",
+            [source.id, req.currentUser.id]
+        );
+        if (deletedForMe) return res.status(400).json({ error: "Нельзя переслать удалённое у себя сообщение" });
+
+        let targetChat = null;
+        if (req.body.targetUserId) {
+            targetChat = ensureDirectChat(req.currentUser.id, req.body.targetUserId);
+        } else if (req.body.targetChatId) {
+            requireChatMember(req.body.targetChatId, req.currentUser.id);
+            targetChat = chatForUser(get("SELECT * FROM chats WHERE id = ?", [req.body.targetChatId]), req.currentUser.id);
+        }
+
+        if (!targetChat) return res.status(400).json({ error: "Выберите получателя" });
+
+        const attachment = get("SELECT file_id FROM message_attachments WHERE message_id = ? LIMIT 1", [source.id]);
+        const message = insertMessage(
+            req.currentUser,
+            targetChat.id,
+            {
+                text: source.body || "",
+                fileId: attachment?.file_id || null,
+                kind: source.kind === "voice" ? "voice" : attachment ? "file" : "text",
+            },
+            { allowAccessibleFile: true }
+        );
+
+        io.to(`user_${req.currentUser.id}`).emit("newMessage", message);
+        notifyChatMembers(targetChat.id, req.currentUser.id, message);
+        res.status(201).json({ chat: chatForUser(get("SELECT * FROM chats WHERE id = ?", [targetChat.id]), req.currentUser.id), message });
     } catch (error) {
         handleError(res, error);
     }

@@ -26,10 +26,23 @@
                             <button type="button" id="refreshChatsButton">Обновить</button>
                             <button type="button" id="openGroupPanelButton">Группа</button>
                         </div>
+                        <div class="modal-scrim hidden" id="groupScrim"></div>
                         <form class="group-panel hidden" id="groupForm">
+                            <div class="group-panel-head">
+                                <div>
+                                    <strong>Новая группа</strong>
+                                    <span>Выберите участников и задайте название</span>
+                                </div>
+                                <button class="icon-button" type="button" id="closeGroupPanelButton" aria-label="Закрыть">×</button>
+                            </div>
                             <input type="text" name="title" placeholder="Название группы" required>
+                            <div class="group-members-label">Участники</div>
                             <div class="checkbox-list" id="groupMembers"></div>
-                            <button type="submit">Создать группу</button>
+                            <p class="form-error" id="groupError"></p>
+                            <div class="dual-actions">
+                                <button class="ghost-button" type="button" id="cancelGroupButton">Отмена</button>
+                                <button type="submit">Создать</button>
+                            </div>
                         </form>
                         <div id="chatList" class="chat-list"></div>
                     </aside>
@@ -46,6 +59,10 @@
                                 </div>
                             </div>
                             <div id="messages" class="messages"></div>
+                            <div class="reply-preview hidden" id="replyPreview">
+                                <span id="replyPreviewText"></span>
+                                <button type="button" id="clearReplyButton">×</button>
+                            </div>
                             <div class="attachment-preview hidden" id="attachmentPreview">
                                 <span id="attachmentName"></span>
                                 <button type="button" id="clearAttachment">×</button>
@@ -134,6 +151,29 @@
             <button class="nav-button admin-only hidden" type="button" data-view="viewAdmin">Админ</button>
             <button class="nav-button" type="button" data-view="viewProfile">Профиль</button>
         </nav>
+
+        <div class="modal-scrim hidden" id="messageActionScrim"></div>
+        <div class="action-sheet hidden" id="messageActionSheet">
+            <div class="action-sheet-title" id="messageActionTitle">Сообщение</div>
+            <button type="button" data-message-action="reply">Ответить</button>
+            <button type="button" data-message-action="forward">Переслать</button>
+            <button type="button" data-message-action="edit">Изменить</button>
+            <button type="button" data-message-action="delete-me">Удалить у себя</button>
+            <button type="button" data-message-action="delete-all">Удалить у всех</button>
+            <button class="ghost-button" type="button" data-message-action="cancel">Отмена</button>
+        </div>
+
+        <div class="modal-scrim hidden" id="forwardScrim"></div>
+        <div class="forward-panel hidden" id="forwardPanel">
+            <div class="group-panel-head">
+                <div>
+                    <strong>Переслать</strong>
+                    <span>Выберите пользователя</span>
+                </div>
+                <button class="icon-button" type="button" id="closeForwardButton" aria-label="Закрыть">×</button>
+            </div>
+            <div id="forwardTargets" class="forward-targets"></div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
