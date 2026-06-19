@@ -62,15 +62,15 @@ function resolveWritableDir(label, preferredPath, fallbackPath) {
     throw new Error(`Cannot find writable ${label} directory`);
 }
 
-const DATA_DIR = resolveWritableDir(
-    "DATA_DIR",
-    process.env.DATA_DIR || path.join(__dirname, "data"),
-    path.join(process.cwd(), ".runtime", "data")
-);
 const STORAGE_DIR = resolveWritableDir(
     "STORAGE_DIR",
     process.env.STORAGE_DIR || path.join(__dirname, "storage"),
     path.join(process.cwd(), ".runtime", "storage")
+);
+const DATA_DIR = resolveWritableDir(
+    "DATA_DIR",
+    process.env.DATA_DIR || path.join(STORAGE_DIR, "data"),
+    path.join(STORAGE_DIR, "data")
 );
 const FILE_DIR = resolveWritableDir(
     "FILE_DIR",
