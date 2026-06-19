@@ -62,6 +62,31 @@ function resolveWritableDir(label, preferredPath, fallbackPath) {
     throw new Error(`Cannot find writable ${label} directory`);
 }
 
+function resolveWritableFile(label, preferredPath, fallbackPath) {
+    const candidates = uniquePaths([
+        preferredPath,
+        fallbackPath,
+        path.join(os.tmpdir(), "messenger", "data", path.basename(fallbackPath)),
+    ]);
+
+    for (const candidate of candidates) {
+        try {
+            ensureWritableDir(path.dirname(candidate));
+            if (fs.existsSync(candidate)) {
+                fs.accessSync(candidate, fs.constants.W_OK);
+            }
+            if (path.resolve(preferredPath) !== candidate) {
+                console.warn(`${label} is not writable at ${preferredPath}; using ${candidate}`);
+            }
+            return candidate;
+        } catch (error) {
+            console.warn(`${label} path is not writable: ${candidate} (${error.code || error.message})`);
+        }
+    }
+
+    throw new Error(`Cannot find writable ${label} file`);
+}
+
 const STORAGE_DIR = resolveWritableDir(
     "STORAGE_DIR",
     process.env.STORAGE_DIR || path.join(__dirname, "storage"),
@@ -77,8 +102,11 @@ const FILE_DIR = resolveWritableDir(
     process.env.FILE_DIR || path.join(STORAGE_DIR, "files"),
     path.join(STORAGE_DIR, "files")
 );
-const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, "messenger.sqlite");
-ensureWritableDir(path.dirname(DB_FILE));
+const DB_FILE = resolveWritableFile(
+    "DB_FILE",
+    process.env.DB_FILE || path.join(DATA_DIR, "messenger.sqlite"),
+    path.join(DATA_DIR, "messenger.sqlite")
+);
 
 const db = new DatabaseSync(DB_FILE);
 db.exec("PRAGMA foreign_keys = ON;");
@@ -1017,7 +1045,14 @@ ensureBootstrapAdmin();
 ensureInitialInvite();
 
 app.get("/health", (req, res) => {
-    res.json({ ok: true, storage: "sqlite", time: now() });
+    res.json({
+        ok: true,
+        storage: "sqlite",
+        dataDir: DATA_DIR,
+        storageDir: STORAGE_DIR,
+        dbFile: DB_FILE,
+        time: now(),
+    });
 });
 
 app.get("/push/key", requireUser, (req, res) => {
