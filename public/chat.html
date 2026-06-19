@@ -4,14 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Messenger</title>
+    <link rel="manifest" href="/manifest.json">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="app-body">
     <div class="app-shell">
         <header class="app-header">
-            <button class="avatar-button" id="headerAvatar" type="button" aria-label="Открыть профиль"></button>
+            <button class="avatar-button" id="headerAvatar" type="button" aria-label="Профиль"></button>
             <div class="header-user">
-                <strong id="headerName"></strong>
+                <strong id="headerName">Messenger</strong>
                 <span id="headerTag"></span>
             </div>
             <button class="ghost-button" id="logoutButton" type="button">Выйти</button>
@@ -19,40 +20,42 @@
 
         <main class="app-main">
             <section class="view active" id="viewChats">
-                <div class="search-box">
-                    <input type="search" id="tagSearch" placeholder="Найти по тегу">
-                    <button type="button" id="tagSearchButton">Найти</button>
-                </div>
-                <div class="search-results" id="searchResults"></div>
+                <div class="chat-layout">
+                    <aside class="chat-list-panel">
+                        <div class="toolbar">
+                            <button type="button" id="refreshChatsButton">Обновить</button>
+                            <button type="button" id="openGroupPanelButton">Группа</button>
+                        </div>
+                        <form class="group-panel hidden" id="groupForm">
+                            <input type="text" name="title" placeholder="Название группы" required>
+                            <div class="checkbox-list" id="groupMembers"></div>
+                            <button type="submit">Создать группу</button>
+                        </form>
+                        <div id="chatList" class="chat-list"></div>
+                    </aside>
 
-                <div class="chat-screen">
-                    <aside class="users" id="users"></aside>
-
-                    <section class="chat" id="chatPane">
+                    <section class="chat-panel">
                         <div class="empty-chat" id="emptyChat">Выберите чат</div>
-
-                        <div class="chat-content hidden" id="chatContent">
+                        <div class="chat-room hidden" id="chatRoom">
                             <div class="chat-title">
                                 <button class="back-button" type="button" id="closeChatButton">‹</button>
-                                <button class="avatar-button small" id="chatAvatar" type="button" aria-label="Открыть профиль"></button>
+                                <div class="avatar-button small" id="chatAvatar"></div>
                                 <div>
-                                    <strong id="chatName"></strong>
-                                    <span id="chatTag"></span>
+                                    <strong id="chatTitle"></strong>
+                                    <span id="chatSubtitle"></span>
                                 </div>
                             </div>
-
                             <div id="messages" class="messages"></div>
-
                             <div class="attachment-preview hidden" id="attachmentPreview">
                                 <span id="attachmentName"></span>
                                 <button type="button" id="clearAttachment">×</button>
                             </div>
-
                             <form class="message-form" id="messageForm">
-                                <label class="file-button" for="messageFile">+</label>
+                                <label class="icon-button" for="messageFile">+</label>
                                 <input type="file" id="messageFile" hidden>
-                                <input type="text" id="text" placeholder="Сообщение">
-                                <button type="submit" class="send-button">↑</button>
+                                <button class="icon-button" type="button" id="voiceButton">●</button>
+                                <input type="text" id="messageText" placeholder="Сообщение">
+                                <button class="send-button" type="submit">↑</button>
                             </form>
                         </div>
                     </section>
@@ -60,17 +63,63 @@
             </section>
 
             <section class="view" id="viewFeed">
-                <form class="admin-panel hidden" id="newsForm">
-                    <div class="panel-title" id="newsFormTitle">Новая новость</div>
+                <form class="admin-card hidden" id="newsForm">
+                    <div class="section-title" id="newsFormTitle">Новая новость</div>
                     <textarea id="newsText" rows="4" placeholder="Текст новости"></textarea>
                     <input type="file" id="newsImage" accept="image/*">
-                    <div class="panel-actions">
+                    <select id="newsVisibility">
+                        <option value="all">Видят все</option>
+                        <option value="selected">Выбрать аудиторию</option>
+                    </select>
+                    <div class="audience-grid hidden" id="newsAudience">
+                        <div>
+                            <strong>Пользователи</strong>
+                            <div class="checkbox-list" id="newsUsers"></div>
+                        </div>
+                        <div>
+                            <strong>Чаты</strong>
+                            <div class="checkbox-list" id="newsChats"></div>
+                        </div>
+                    </div>
+                    <div class="dual-actions">
                         <button type="button" class="ghost-button" id="cancelNewsEdit">Сбросить</button>
                         <button type="submit" id="saveNewsButton">Опубликовать</button>
                     </div>
                 </form>
+                <div id="newsList" class="feed-list"></div>
+            </section>
 
-                <div class="feed-list" id="newsList"></div>
+            <section class="view" id="viewPeople">
+                <div class="search-box">
+                    <input type="search" id="peopleSearch" placeholder="Поиск по тегу или имени">
+                    <button type="button" id="peopleSearchButton">Найти</button>
+                </div>
+                <div id="peopleList" class="people-list"></div>
+            </section>
+
+            <section class="view hidden-admin" id="viewAdmin">
+                <div class="admin-stack">
+                    <form class="admin-card" id="inviteForm">
+                        <div class="section-title">Инвайт-коды</div>
+                        <div class="form-grid">
+                            <input type="number" name="maxUses" min="1" max="50" value="1" placeholder="Использований">
+                            <input type="number" name="expiresDays" min="0" value="7" placeholder="Дней">
+                            <select name="role">
+                                <option value="user">Пользователь</option>
+                                <option value="admin">Админ</option>
+                            </select>
+                        </div>
+                        <button type="submit">Создать инвайт</button>
+                    </form>
+                    <div class="admin-card">
+                        <div class="section-title">Готовые инвайты</div>
+                        <div id="inviteList" class="invite-list"></div>
+                    </div>
+                    <div class="admin-card">
+                        <div class="section-title">Сброс пароля</div>
+                        <div id="adminUsers" class="people-list"></div>
+                    </div>
+                </div>
             </section>
 
             <section class="view" id="viewProfile">
@@ -78,9 +127,11 @@
             </section>
         </main>
 
-        <nav class="bottom-nav">
+        <nav class="bottom-nav" id="bottomNav">
             <button class="nav-button active" type="button" data-view="viewChats">Чаты</button>
             <button class="nav-button" type="button" data-view="viewFeed">Лента</button>
+            <button class="nav-button" type="button" data-view="viewPeople">Люди</button>
+            <button class="nav-button admin-only hidden" type="button" data-view="viewAdmin">Админ</button>
             <button class="nav-button" type="button" data-view="viewProfile">Профиль</button>
         </nav>
     </div>

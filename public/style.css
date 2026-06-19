@@ -1,15 +1,15 @@
 :root {
-    --bg: #f5f7fb;
+    --bg: #eef2f6;
     --surface: #ffffff;
-    --surface-2: #eef2f7;
+    --surface-soft: #f6f8fb;
+    --line: #d9e1ea;
     --text: #111827;
-    --muted: #6b7280;
-    --line: #d9e0ea;
+    --muted: #667085;
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
-    --accent: #16a34a;
+    --success: #15803d;
     --danger: #dc2626;
-    --shadow: 0 18px 45px rgba(17, 24, 39, 0.12);
+    --shadow: 0 16px 40px rgba(17, 24, 39, 0.12);
 }
 
 * {
@@ -25,18 +25,19 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
     font: inherit;
 }
 
 button {
+    min-height: 42px;
     border: 0;
     border-radius: 8px;
+    padding: 0 12px;
     background: var(--primary);
     color: #fff;
     cursor: pointer;
-    min-height: 42px;
-    padding: 0 14px;
 }
 
 button:active {
@@ -44,28 +45,32 @@ button:active {
 }
 
 input,
-textarea {
+textarea,
+select {
     width: 100%;
     min-width: 0;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: #fff;
     color: var(--text);
-    outline: none;
     padding: 12px;
+    outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 textarea {
     resize: vertical;
 }
 
-input:focus,
-textarea:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-
-.hidden {
+.hidden,
+.auth-form:not(.active),
+.hidden-admin {
     display: none !important;
 }
 
@@ -73,20 +78,22 @@ textarea:focus {
     min-height: 100vh;
     display: grid;
     place-items: center;
-    padding: 20px;
+    padding: 18px;
     background:
-        linear-gradient(140deg, rgba(37, 99, 235, 0.12), transparent 42%),
-        linear-gradient(320deg, rgba(22, 163, 74, 0.16), transparent 40%),
+        linear-gradient(150deg, rgba(37, 99, 235, 0.14), transparent 42%),
+        linear-gradient(330deg, rgba(21, 128, 61, 0.12), transparent 38%),
         var(--bg);
 }
 
-.login-box {
-    width: min(100%, 360px);
-    background: var(--surface);
+.login-shell {
+    width: min(100%, 380px);
+    display: grid;
+    gap: 14px;
+    padding: 24px;
     border: 1px solid var(--line);
     border-radius: 8px;
+    background: var(--surface);
     box-shadow: var(--shadow);
-    padding: 24px;
 }
 
 .brand-mark {
@@ -97,58 +104,89 @@ textarea:focus {
     border-radius: 8px;
     background: var(--primary);
     color: #fff;
-    font-weight: 800;
     font-size: 24px;
+    font-weight: 800;
 }
 
-.login-box h1 {
-    margin: 18px 0;
-    font-size: 28px;
+.login-shell h1,
+.login-note {
+    margin: 0;
 }
 
-.login-form {
+.login-note,
+.form-error,
+.empty-state,
+.chat-row small,
+.person-main span,
+.header-user span,
+.chat-title span,
+.msg time,
+.news-meta {
+    color: var(--muted);
+}
+
+.auth-tabs {
     display: grid;
-    gap: 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
 }
 
-.login-form button {
-    width: 100%;
-    background: var(--primary);
+.auth-tab,
+.ghost-button,
+.nav-button,
+.msg-actions button,
+.news-actions button,
+.icon-button,
+.back-button {
+    background: var(--surface-soft);
+    color: var(--text);
+}
+
+.auth-tab.active,
+.nav-button.active {
+    background: #dbeafe;
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
+.auth-form {
+    display: grid;
+    gap: 10px;
 }
 
 .form-error {
     min-height: 22px;
     color: var(--danger);
-    margin: 14px 0 0;
 }
 
 .app-body {
     min-height: 100vh;
-    background: #dfe5ef;
 }
 
 .app-shell {
-    width: min(100%, 480px);
+    width: min(100%, 520px);
     height: 100vh;
     margin: 0 auto;
     display: grid;
     grid-template-rows: auto 1fr auto;
+    overflow: hidden;
     background: var(--surface);
-    box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.06);
 }
 
 .app-header {
-    min-height: 70px;
+    min-height: 68px;
     display: grid;
     grid-template-columns: 44px 1fr auto;
     gap: 10px;
     align-items: center;
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
 }
 
-.header-user {
+.header-user,
+.chat-row-main,
+.person-main,
+.chat-title > div {
     min-width: 0;
     display: grid;
     gap: 2px;
@@ -156,23 +194,15 @@ textarea:focus {
 
 .header-user strong,
 .header-user span,
-.user-main strong,
-.user-main span,
+.chat-row-main strong,
+.chat-row-main small,
+.person-main strong,
+.person-main span,
 .chat-title strong,
 .chat-title span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.header-user span,
-.user-main span,
-.chat-title span,
-.news-meta,
-.msg time,
-.profile-hero p {
-    color: var(--muted);
-    font-size: 13px;
 }
 
 .app-main {
@@ -193,95 +223,20 @@ textarea:focus {
 
 .bottom-nav {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    padding: 10px 12px 12px;
+    grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+    gap: 6px;
+    padding: 8px 8px 10px;
     border-top: 1px solid var(--line);
-    background: var(--surface);
 }
 
 .nav-button {
-    min-height: 44px;
-    background: transparent;
-    color: var(--muted);
-}
-
-.nav-button.active {
-    background: var(--surface-2);
-    color: var(--primary-dark);
-    font-weight: 700;
-}
-
-.ghost-button {
-    background: var(--surface-2);
-    color: var(--text);
-}
-
-.search-box {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    padding: 12px;
-    border-bottom: 1px solid var(--line);
-}
-
-.search-results {
-    max-height: 180px;
-    overflow: auto;
-    border-bottom: 1px solid var(--line);
-}
-
-.chat-screen {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-rows: minmax(120px, 34%) 1fr;
-}
-
-.users {
-    min-height: 0;
-    overflow: auto;
-    background: #fbfcfe;
-    border-bottom: 1px solid var(--line);
-}
-
-.user-row {
-    display: grid;
-    grid-template-columns: 42px 1fr auto;
-    gap: 10px;
-    align-items: center;
-    min-height: 64px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-}
-
-.user-row.active {
-    background: #edf4ff;
-}
-
-.user-main {
-    min-width: 0;
-    display: grid;
-    gap: 3px;
-    padding: 0;
-    background: transparent;
-    color: var(--text);
-    text-align: left;
-}
-
-.mini-button {
-    min-height: 34px;
-    padding: 0 10px;
-    background: var(--surface-2);
-    color: var(--text);
+    min-height: 42px;
+    padding: 0 6px;
     font-size: 13px;
 }
 
-.avatar-button {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
-    padding: 0;
+.avatar-button,
+.profile-avatar {
     display: grid;
     place-items: center;
     overflow: hidden;
@@ -289,6 +244,13 @@ textarea:focus {
     background: #dbeafe;
     color: var(--primary-dark);
     font-weight: 800;
+}
+
+.avatar-button {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
 }
 
 .avatar-button.small {
@@ -304,10 +266,93 @@ textarea:focus {
     object-fit: cover;
 }
 
-.chat {
+.chat-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(170px, 36%) 1fr;
+}
+
+.chat-list-panel,
+.chat-panel {
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+
+.chat-list-panel {
+    border-bottom: 1px solid var(--line);
+    background: #fbfcfe;
+}
+
+.toolbar,
+.search-box,
+.message-form,
+.dual-actions,
+.form-grid {
+    display: grid;
+    gap: 8px;
+}
+
+.toolbar,
+.search-box {
+    grid-template-columns: 1fr auto;
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.group-panel,
+.admin-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.chat-list,
+.people-list,
+.feed-list,
+.admin-stack,
+.profile-panel {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.chat-list {
+    display: grid;
+    align-content: start;
+}
+
+.chat-row,
+.person-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 38px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 62px;
+    padding: 10px 12px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+}
+
+.chat-row.active {
+    background: #edf4ff;
+}
+
+.person-row {
+    background: var(--surface);
+}
+
+.person-row button {
+    min-height: 34px;
+    font-size: 13px;
 }
 
 .empty-chat,
@@ -315,18 +360,17 @@ textarea:focus {
     min-height: 120px;
     display: grid;
     place-items: center;
-    color: var(--muted);
-    text-align: center;
     padding: 18px;
+    text-align: center;
 }
 
 .empty-state.compact {
-    min-height: 56px;
+    min-height: 48px;
 }
 
-.chat-content {
+.chat-room {
+    flex: 1;
     min-height: 0;
-    height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto auto;
 }
@@ -341,35 +385,33 @@ textarea:focus {
     border-bottom: 1px solid var(--line);
 }
 
-.chat-title > div {
-    min-width: 0;
-    display: grid;
-    gap: 2px;
+.back-button,
+.icon-button,
+.send-button {
+    width: 42px;
+    min-height: 42px;
+    padding: 0;
 }
 
 .back-button {
     width: 36px;
     min-height: 36px;
-    padding: 0;
-    background: var(--surface-2);
-    color: var(--text);
-    font-size: 30px;
-    line-height: 1;
+    font-size: 28px;
 }
 
 .messages {
     min-height: 0;
-    overflow-y: auto;
+    overflow: auto;
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    background: #f8fafc;
+    background: var(--surface-soft);
 }
 
 .msg {
     width: fit-content;
-    max-width: min(82%, 340px);
+    max-width: min(86%, 360px);
     display: grid;
     gap: 6px;
     padding: 9px 10px;
@@ -386,11 +428,31 @@ textarea:focus {
 .msg.him {
     align-self: flex-start;
     background: #e5e7eb;
-    color: var(--text);
+}
+
+.msg-sender {
+    font-size: 13px;
+}
+
+.muted {
+    opacity: 0.76;
 }
 
 .msg.me time {
-    color: rgba(255, 255, 255, 0.72);
+    color: rgba(255, 255, 255, 0.76);
+}
+
+.msg-actions,
+.news-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.msg-actions button {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
 }
 
 .attachment {
@@ -400,15 +462,22 @@ textarea:focus {
     text-decoration: none;
 }
 
-.attachment img {
-    width: min(240px, 100%);
-    max-height: 240px;
-    display: block;
+.attachment img,
+.attachment video {
+    width: min(260px, 100%);
+    max-height: 260px;
     border-radius: 8px;
     object-fit: cover;
+    background: #111827;
 }
 
-.attachment span {
+.attachment audio {
+    width: min(260px, 100%);
+}
+
+.attachment span,
+.attachment a {
+    color: inherit;
     overflow-wrap: anywhere;
     font-size: 13px;
     text-decoration: underline;
@@ -421,7 +490,7 @@ textarea:focus {
     align-items: center;
     padding: 8px 12px;
     border-top: 1px solid var(--line);
-    background: #f8fafc;
+    background: var(--surface);
 }
 
 .attachment-preview span {
@@ -435,68 +504,30 @@ textarea:focus {
     width: 34px;
     min-height: 34px;
     padding: 0;
-    background: var(--surface-2);
+    background: var(--surface-soft);
     color: var(--text);
 }
 
 .message-form {
-    display: grid;
-    grid-template-columns: 42px 1fr 42px;
-    gap: 8px;
+    grid-template-columns: 42px 42px 1fr 42px;
     padding: 10px 12px;
     border-top: 1px solid var(--line);
-    background: var(--surface);
 }
 
-.file-button,
-.send-button {
-    width: 42px;
-    height: 42px;
-    min-height: 42px;
-    display: grid;
-    place-items: center;
-    border-radius: 8px;
+.recording {
+    background: var(--danger);
+    color: #fff;
 }
 
-.file-button {
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 22px;
-}
-
-.send-button {
-    padding: 0;
-    font-size: 20px;
-}
-
-.admin-panel {
-    display: grid;
-    gap: 10px;
-    padding: 12px;
-    border-bottom: 1px solid var(--line);
-    background: #fbfcfe;
-}
-
-.panel-title {
-    font-weight: 800;
-}
-
-.panel-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-}
-
-.feed-list {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
+.feed-list,
+.people-list,
+.admin-stack,
+.profile-panel {
     display: grid;
     align-content: start;
     gap: 12px;
     padding: 12px;
-    background: #f8fafc;
+    background: var(--surface-soft);
 }
 
 .news-card {
@@ -511,7 +542,7 @@ textarea:focus {
     aspect-ratio: 16 / 10;
     display: block;
     object-fit: cover;
-    background: var(--surface-2);
+    background: #dbe3ee;
 }
 
 .news-body {
@@ -523,7 +554,8 @@ textarea:focus {
 .news-meta {
     display: flex;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px;
+    font-size: 13px;
 }
 
 .news-body p {
@@ -532,22 +564,15 @@ textarea:focus {
     overflow-wrap: anywhere;
 }
 
-.news-actions,
-.news-admin,
 .comment-form {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr 42px;
     gap: 8px;
 }
 
-.news-actions button,
-.news-admin button {
-    background: var(--surface-2);
-    color: var(--text);
-}
-
-.news-admin button:last-child {
-    color: var(--danger);
+.comment-form button {
+    width: 42px;
+    padding: 0;
 }
 
 .comments {
@@ -561,7 +586,6 @@ textarea:focus {
     padding: 8px;
     border-radius: 8px;
     background: #f1f5f9;
-    overflow-wrap: anywhere;
 }
 
 .comment strong {
@@ -572,24 +596,73 @@ textarea:focus {
     font-size: 14px;
 }
 
-.comment-form {
-    grid-template-columns: 1fr 42px;
+.section-title {
+    font-weight: 800;
 }
 
-.comment-form button {
-    width: 42px;
-    min-height: 42px;
+.dual-actions {
+    grid-template-columns: 1fr 1fr;
+}
+
+.form-grid {
+    grid-template-columns: 1fr 1fr;
+}
+
+.form-grid select {
+    grid-column: 1 / -1;
+}
+
+.audience-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.checkbox-list {
+    max-height: 180px;
+    overflow: auto;
+    display: grid;
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.check-row {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 8px;
+    align-items: center;
+    min-height: 30px;
+}
+
+.check-row input {
+    width: 18px;
+    height: 18px;
     padding: 0;
 }
 
-.profile-panel {
-    flex: 1;
-    overflow: auto;
+.check-row span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.check-row small {
+    color: var(--muted);
+}
+
+.invite-list {
     display: grid;
-    align-content: start;
-    gap: 16px;
-    padding: 18px 14px;
-    background: #f8fafc;
+    gap: 8px;
+}
+
+.invite-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: 9px;
+    border-radius: 8px;
+    background: var(--surface-soft);
 }
 
 .profile-hero {
@@ -606,14 +679,7 @@ textarea:focus {
 .profile-avatar {
     width: 96px;
     height: 96px;
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    border-radius: 8px;
-    background: #dbeafe;
-    color: var(--primary-dark);
     font-size: 42px;
-    font-weight: 800;
 }
 
 .profile-hero h2,
@@ -624,29 +690,27 @@ textarea:focus {
 }
 
 .role-badge {
-    display: inline-flex;
-    align-items: center;
     min-height: 28px;
+    display: inline-grid;
+    place-items: center;
     padding: 0 10px;
     border-radius: 8px;
     background: #dcfce7;
     color: #166534;
-    font-weight: 700;
     font-size: 13px;
+    font-weight: 700;
 }
 
-.profile-actions,
 .profile-form {
     display: grid;
     gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
 }
 
-.profile-actions > button,
-.profile-form button {
-    width: 100%;
-}
-
-@media (min-width: 800px) {
+@media (min-width: 840px) {
     .app-body {
         padding: 18px;
     }
@@ -654,15 +718,15 @@ textarea:focus {
     .app-shell {
         height: calc(100vh - 36px);
         border-radius: 8px;
-        overflow: hidden;
+        box-shadow: var(--shadow);
     }
 
-    .chat-screen {
-        grid-template-columns: 180px 1fr;
+    .chat-layout {
+        grid-template-columns: 220px 1fr;
         grid-template-rows: 1fr;
     }
 
-    .users {
+    .chat-list-panel {
         border-right: 1px solid var(--line);
         border-bottom: 0;
     }

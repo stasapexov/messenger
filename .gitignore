@@ -22,10 +22,14 @@ Thumbs.db
 # Database
 *.sqlite
 *.db
+*.sqlite-shm
+*.sqlite-wal
 data/*.json
 data/*.tmp
 public/uploads/*
 !public/uploads/.gitkeep
+storage/*
+!storage/.gitkeep
 
 # Build files
 dist/

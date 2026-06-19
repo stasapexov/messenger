@@ -1,20 +1,24 @@
 {
   "name": "messenger",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Private small-team messenger with SQLite, invites, protected files and push notifications.",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --check server.js && node --check public/chat.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "multer": "^2.2.0",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "web-push": "^3.6.7"
   }
 }

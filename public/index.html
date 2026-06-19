@@ -3,59 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход в Messenger</title>
+    <title>Messenger</title>
+    <link rel="manifest" href="/manifest.json">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="login-body">
-    <main class="login-box">
+    <main class="login-shell">
         <div class="brand-mark">M</div>
-        <h1>Вход</h1>
-        <form id="loginForm" class="login-form">
-            <input type="text" id="login" placeholder="Логин" autocomplete="username" required>
-            <input type="password" id="password" placeholder="Пароль" autocomplete="current-password" required>
+        <h1>Messenger</h1>
+        <p class="login-note">Приватный чат по инвайтам</p>
+
+        <div class="auth-tabs">
+            <button class="auth-tab active" type="button" data-auth="login">Вход</button>
+            <button class="auth-tab" type="button" data-auth="register">Регистрация</button>
+        </div>
+
+        <form id="loginForm" class="auth-form active">
+            <input type="text" name="login" placeholder="Логин" autocomplete="username" required>
+            <input type="password" name="password" placeholder="Пароль" autocomplete="current-password" required>
             <button type="submit">Войти</button>
         </form>
-        <p id="error" class="form-error" aria-live="polite"></p>
+
+        <form id="registerForm" class="auth-form">
+            <input type="text" name="name" placeholder="Имя" autocomplete="name" required>
+            <input type="text" name="login" placeholder="Логин и тег" autocomplete="username" required>
+            <input type="password" name="password" placeholder="Пароль" autocomplete="new-password" required>
+            <input type="text" name="inviteCode" placeholder="Инвайт-код" required>
+            <button type="submit">Создать аккаунт</button>
+        </form>
+
+        <p id="authError" class="form-error" aria-live="polite"></p>
     </main>
 
     <script>
-        const loginForm = document.getElementById("loginForm");
-        const errorEl = document.getElementById("error");
+        const authTabs = document.querySelectorAll(".auth-tab");
+        const forms = {
+            login: document.getElementById("loginForm"),
+            register: document.getElementById("registerForm"),
+        };
+        const authError = document.getElementById("authError");
 
-        loginForm.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            errorEl.textContent = "";
+        authTabs.forEach((tab) => {
+            tab.addEventListener("click", () => {
+                authTabs.forEach((item) => item.classList.toggle("active", item === tab));
+                Object.entries(forms).forEach(([key, form]) => form.classList.toggle("active", key === tab.dataset.auth));
+                authError.textContent = "";
+            });
+        });
 
-            const loginInput = document.getElementById("login");
-            const passwordInput = document.getElementById("password");
+        async function submitAuth(path, form) {
+            authError.textContent = "";
+            const body = Object.fromEntries(new FormData(form).entries());
 
             try {
-                const response = await fetch("/login", {
+                const response = await fetch(path, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        login: loginInput.value,
-                        password: passwordInput.value,
-                    }),
+                    body: JSON.stringify(body),
                 });
                 const data = await response.json();
 
-                if (!data.success) {
-                    errorEl.textContent = "Неверный логин или пароль";
+                if (!response.ok || !data.success) {
+                    authError.textContent = data.error || "Не удалось войти";
                     return;
                 }
 
-                const user = data.user || {};
-                localStorage.setItem("userId", data.userId || user.id);
-                localStorage.setItem("userName", data.userName || user.name);
-                localStorage.setItem("userTag", data.userTag || user.tag);
-                localStorage.setItem("isAdmin", String(data.isAdmin || user.isAdmin));
-                localStorage.setItem("avatar", user.avatar || "");
-
                 window.location = "chat.html";
             } catch (error) {
-                errorEl.textContent = "Сервер не отвечает";
+                authError.textContent = "Сервер не отвечает";
             }
+        }
+
+        forms.login.addEventListener("submit", (event) => {
+            event.preventDefault();
+            submitAuth("/login", forms.login);
+        });
+
+        forms.register.addEventListener("submit", (event) => {
+            event.preventDefault();
+            submitAuth("/register", forms.register);
+        });
+
+        fetch("/me").then((response) => {
+            if (response.ok) window.location = "chat.html";
         });
     </script>
 </body>
