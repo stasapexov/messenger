@@ -17,9 +17,25 @@ const io = new Server(server, {
 });
 
 function parsePort(value, fallback) {
-    const match = String(value || "").match(/\d+/);
-    const parsed = match ? Number(match[0]) : fallback;
-    return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : fallback;
+    const text = String(value || "").trim();
+    if (!text) return fallback;
+
+    const direct = Number(text);
+    if (Number.isInteger(direct) && direct > 0 && direct < 65536) return direct;
+
+    try {
+        const url = new URL(text.includes("://") ? text : `tcp://${text}`);
+        const parsed = Number(url.port);
+        if (Number.isInteger(parsed) && parsed > 0 && parsed < 65536) return parsed;
+    } catch {
+        // Fall back to extracting numeric chunks below.
+    }
+
+    const candidates = [...text.matchAll(/\d+/g)]
+        .map((match) => Number(match[0]))
+        .filter((parsed) => Number.isInteger(parsed) && parsed > 0 && parsed < 65536);
+
+    return candidates.length ? candidates[candidates.length - 1] : fallback;
 }
 
 const PORT = parsePort(process.env.PORT, 3000);
@@ -1628,6 +1644,7 @@ app.use((error, req, res, next) => {
 
 server.listen(PORT, HOST, () => {
     console.log(`Messenger server started on http://${HOST}:${PORT}`);
+    console.log(`PORT env: ${process.env.PORT || "(empty)"}; parsed port: ${PORT}`);
     console.log(`Data directory: ${DATA_DIR}`);
     console.log(`Storage directory: ${STORAGE_DIR}`);
 });
