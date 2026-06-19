@@ -53,12 +53,18 @@ INITIAL_INVITE_CODE=MSG-FIRST-CODE
 SESSION_DAYS=30
 MAX_UPLOAD_MB=250
 COOKIE_SECURE=true
+DATA_DIR=/persistent/data
+STORAGE_DIR=/persistent/storage
+FILE_DIR=/persistent/storage/files
+DB_FILE=/persistent/data/messenger.sqlite
 WEB_PUSH_SUBJECT=mailto:you@example.com
 VAPID_PUBLIC_KEY=...
 VAPID_PRIVATE_KEY=...
 ```
 
 Если `VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` не заданы, сервер создаст и сохранит их сам.
+
+Если платформа не разрешает писать в папку приложения, сервер автоматически уйдёт во временную writable-папку. Это удобно для запуска, но временное хранилище может очищаться при перезапуске или редеплое. Для реальных пользователей задайте `DATA_DIR`, `STORAGE_DIR` и при необходимости `DB_FILE` на постоянный диск.
 
 ## Данные сервера
 
@@ -72,6 +78,8 @@ VAPID_PRIVATE_KEY=...
 Для бэкапа достаточно сохранять папки `data/` и `storage/`.
 
 ## Timeweb Cloud
+
+### VPS / Cloud Server
 
 1. Установите Node.js 22+.
 2. Склонируйте репозиторий на VPS.
@@ -98,6 +106,25 @@ server {
     }
 }
 ```
+
+### App Platform
+
+В Timeweb App Platform рабочая папка приложения может быть read-only. Если в логах есть ошибка вроде:
+
+```text
+EACCES: permission denied, mkdir '/app/data'
+```
+
+обновите приложение до актуального коммита и задайте постоянные пути для данных, если App Platform подключает persistent storage:
+
+```env
+DATA_DIR=/path/to/persistent/data
+STORAGE_DIR=/path/to/persistent/storage
+FILE_DIR=/path/to/persistent/storage/files
+DB_FILE=/path/to/persistent/data/messenger.sqlite
+```
+
+Если постоянного диска нет, приложение всё равно запустится через fallback во временную папку, но сообщения, файлы, инвайты и пользователи могут пропасть после перезапуска контейнера. Для приватного мессенджера с настоящим хранением данных надёжнее использовать Timeweb Cloud Server/VPS или подключённое постоянное хранилище.
 
 ## API
 

@@ -30,6 +30,7 @@ public/uploads/*
 !public/uploads/.gitkeep
 storage/*
 !storage/.gitkeep
+.runtime/
 
 # Build files
 dist/

@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const cors = require("cors");
 const multer = require("multer");
@@ -17,17 +18,60 @@ const io = new Server(server, {
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
-const STORAGE_DIR = path.join(__dirname, "storage");
-const FILE_DIR = path.join(STORAGE_DIR, "files");
-const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, "messenger.sqlite");
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 250);
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
 const COOKIE_SECURE = process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
 const WEB_PUSH_SUBJECT = process.env.WEB_PUSH_SUBJECT || "mailto:admin@example.com";
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(FILE_DIR, { recursive: true });
+function ensureWritableDir(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return dir;
+}
+
+function uniquePaths(paths) {
+    return [...new Set(paths.filter(Boolean).map((item) => path.resolve(item)))];
+}
+
+function resolveWritableDir(label, preferredPath, fallbackPath) {
+    const candidates = uniquePaths([
+        preferredPath,
+        fallbackPath,
+        path.join(os.tmpdir(), "messenger", label.toLowerCase()),
+    ]);
+
+    for (const candidate of candidates) {
+        try {
+            const resolved = ensureWritableDir(candidate);
+            if (path.resolve(preferredPath) !== resolved) {
+                console.warn(`${label} is not writable at ${preferredPath}; using ${resolved}`);
+            }
+            return resolved;
+        } catch (error) {
+            console.warn(`${label} path is not writable: ${candidate} (${error.code || error.message})`);
+        }
+    }
+
+    throw new Error(`Cannot find writable ${label} directory`);
+}
+
+const DATA_DIR = resolveWritableDir(
+    "DATA_DIR",
+    process.env.DATA_DIR || path.join(__dirname, "data"),
+    path.join(process.cwd(), ".runtime", "data")
+);
+const STORAGE_DIR = resolveWritableDir(
+    "STORAGE_DIR",
+    process.env.STORAGE_DIR || path.join(__dirname, "storage"),
+    path.join(process.cwd(), ".runtime", "storage")
+);
+const FILE_DIR = resolveWritableDir(
+    "FILE_DIR",
+    process.env.FILE_DIR || path.join(STORAGE_DIR, "files"),
+    path.join(STORAGE_DIR, "files")
+);
+const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, "messenger.sqlite");
+ensureWritableDir(path.dirname(DB_FILE));
 
 const db = new DatabaseSync(DB_FILE);
 db.exec("PRAGMA foreign_keys = ON;");
