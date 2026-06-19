@@ -16,7 +16,13 @@ const io = new Server(server, {
     cors: { origin: true, credentials: true },
 });
 
-const PORT = Number(process.env.PORT || 3000);
+function parsePort(value, fallback) {
+    const match = String(value || "").match(/\d+/);
+    const parsed = match ? Number(match[0]) : fallback;
+    return Number.isInteger(parsed) && parsed > 0 && parsed < 65536 ? parsed : fallback;
+}
+
+const PORT = parsePort(process.env.PORT, 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 250);
@@ -1493,4 +1499,6 @@ app.use((error, req, res, next) => {
 
 server.listen(PORT, HOST, () => {
     console.log(`Messenger server started on http://${HOST}:${PORT}`);
+    console.log(`Data directory: ${DATA_DIR}`);
+    console.log(`Storage directory: ${STORAGE_DIR}`);
 });
