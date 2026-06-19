@@ -1502,3 +1502,18 @@ server.listen(PORT, HOST, () => {
     console.log(`Data directory: ${DATA_DIR}`);
     console.log(`Storage directory: ${STORAGE_DIR}`);
 });
+
+function shutdown(signal) {
+    console.log(`Received ${signal}, shutting down gracefully`);
+    server.close(() => {
+        db.close();
+        process.exit(0);
+    });
+
+    setTimeout(() => {
+        process.exit(0);
+    }, 5000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
