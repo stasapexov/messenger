@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messenger</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="app-body">
+    <div class="app-shell">
+        <header class="app-header">
+            <button class="avatar-button" id="headerAvatar" type="button" aria-label="Открыть профиль"></button>
+            <div class="header-user">
+                <strong id="headerName"></strong>
+                <span id="headerTag"></span>
+            </div>
+            <button class="ghost-button" id="logoutButton" type="button">Выйти</button>
+        </header>
+
+        <main class="app-main">
+            <section class="view active" id="viewChats">
+                <div class="search-box">
+                    <input type="search" id="tagSearch" placeholder="Найти по тегу">
+                    <button type="button" id="tagSearchButton">Найти</button>
+                </div>
+                <div class="search-results" id="searchResults"></div>
+
+                <div class="chat-screen">
+                    <aside class="users" id="users"></aside>
+
+                    <section class="chat" id="chatPane">
+                        <div class="empty-chat" id="emptyChat">Выберите чат</div>
+
+                        <div class="chat-content hidden" id="chatContent">
+                            <div class="chat-title">
+                                <button class="back-button" type="button" id="closeChatButton">‹</button>
+                                <button class="avatar-button small" id="chatAvatar" type="button" aria-label="Открыть профиль"></button>
+                                <div>
+                                    <strong id="chatName"></strong>
+                                    <span id="chatTag"></span>
+                                </div>
+                            </div>
+
+                            <div id="messages" class="messages"></div>
+
+                            <div class="attachment-preview hidden" id="attachmentPreview">
+                                <span id="attachmentName"></span>
+                                <button type="button" id="clearAttachment">×</button>
+                            </div>
+
+                            <form class="message-form" id="messageForm">
+                                <label class="file-button" for="messageFile">+</label>
+                                <input type="file" id="messageFile" hidden>
+                                <input type="text" id="text" placeholder="Сообщение">
+                                <button type="submit" class="send-button">↑</button>
+                            </form>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="view" id="viewFeed">
+                <form class="admin-panel hidden" id="newsForm">
+                    <div class="panel-title" id="newsFormTitle">Новая новость</div>
+                    <textarea id="newsText" rows="4" placeholder="Текст новости"></textarea>
+                    <input type="file" id="newsImage" accept="image/*">
+                    <div class="panel-actions">
+                        <button type="button" class="ghost-button" id="cancelNewsEdit">Сбросить</button>
+                        <button type="submit" id="saveNewsButton">Опубликовать</button>
+                    </div>
+                </form>
+
+                <div class="feed-list" id="newsList"></div>
+            </section>
+
+            <section class="view" id="viewProfile">
+                <div class="profile-panel" id="profilePanel"></div>
+            </section>
+        </main>
+
+        <nav class="bottom-nav">
+            <button class="nav-button active" type="button" data-view="viewChats">Чаты</button>
+            <button class="nav-button" type="button" data-view="viewFeed">Лента</button>
+            <button class="nav-button" type="button" data-view="viewProfile">Профиль</button>
+        </nav>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="chat.js"></script>
+</body>
+</html>

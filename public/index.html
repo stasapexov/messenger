@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход в Messenger</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+    <main class="login-box">
+        <div class="brand-mark">M</div>
+        <h1>Вход</h1>
+        <form id="loginForm" class="login-form">
+            <input type="text" id="login" placeholder="Логин" autocomplete="username" required>
+            <input type="password" id="password" placeholder="Пароль" autocomplete="current-password" required>
+            <button type="submit">Войти</button>
+        </form>
+        <p id="error" class="form-error" aria-live="polite"></p>
+    </main>
+
+    <script>
+        const loginForm = document.getElementById("loginForm");
+        const errorEl = document.getElementById("error");
+
+        loginForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            errorEl.textContent = "";
+
+            const loginInput = document.getElementById("login");
+            const passwordInput = document.getElementById("password");
+
+            try {
+                const response = await fetch("/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        login: loginInput.value,
+                        password: passwordInput.value,
+                    }),
+                });
+                const data = await response.json();
+
+                if (!data.success) {
+                    errorEl.textContent = "Неверный логин или пароль";
+                    return;
+                }
+
+                const user = data.user || {};
+                localStorage.setItem("userId", data.userId || user.id);
+                localStorage.setItem("userName", data.userName || user.name);
+                localStorage.setItem("userTag", data.userTag || user.tag);
+                localStorage.setItem("isAdmin", String(data.isAdmin || user.isAdmin));
+                localStorage.setItem("avatar", user.avatar || "");
+
+                window.location = "chat.html";
+            } catch (error) {
+                errorEl.textContent = "Сервер не отвечает";
+            }
+        });
+    </script>
+</body>
+</html>
