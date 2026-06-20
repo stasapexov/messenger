@@ -301,13 +301,18 @@ function fileType(mimeType) {
 
 function publicUser(user) {
     if (!user) return null;
+    const role = userRole(user);
 
     return {
         id: user.id,
         login: user.login,
         name: user.name,
         tag: user.tag,
-        isAdmin: Boolean(user.is_admin),
+        role,
+        bio: user.bio || "",
+        isAdmin: role === "admin",
+        isSubadmin: role === "subadmin",
+        canPublish: ["admin", "subadmin"].includes(role),
         avatar: user.avatar_file_id ? `/files/${user.avatar_file_id}` : null,
         createdAt: user.created_at,
     };
@@ -342,10 +347,37 @@ function requireUser(req, res, next) {
     next();
 }
 
+function normalizeRole(role) {
+    return ["admin", "subadmin", "user"].includes(role) ? role : "user";
+}
+
+function userRole(user) {
+    if (!user) return "user";
+    if (user.is_admin) return "admin";
+    return normalizeRole(user.role);
+}
+
+function isAdmin(user) {
+    return userRole(user) === "admin";
+}
+
+function canPublish(user) {
+    return ["admin", "subadmin"].includes(userRole(user));
+}
+
 function requireAdmin(req, res, next) {
     requireUser(req, res, () => {
-        if (!req.currentUser.is_admin) {
+        if (!isAdmin(req.currentUser)) {
             return res.status(403).json({ error: "Доступ только для админа" });
+        }
+        next();
+    });
+}
+
+function requirePublisher(req, res, next) {
+    requireUser(req, res, () => {
+        if (!canPublish(req.currentUser)) {
+            return res.status(403).json({ error: "Доступ только для админа или под-админа" });
         }
         next();
     });
@@ -382,6 +414,8 @@ function createSchema() {
             name TEXT NOT NULL,
             tag TEXT NOT NULL UNIQUE,
             avatar_file_id TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            bio TEXT NOT NULL DEFAULT '',
             is_admin INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -530,6 +564,26 @@ function createSchema() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS profile_posts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            image_file_id TEXT NOT NULL,
+            caption TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS stickers (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, file_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS push_subscriptions (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
@@ -550,16 +604,50 @@ function createSchema() {
         CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id);
         CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id);
+        CREATE INDEX IF NOT EXISTS idx_profile_posts_user ON profile_posts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
     `);
 }
 
 function migrateSchema() {
+    const userColumns = all("PRAGMA table_info(users)");
+    if (!userColumns.some((column) => column.name === "role")) {
+        run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+        run("UPDATE users SET role = CASE WHEN is_admin = 1 THEN 'admin' ELSE 'user' END");
+    }
+    if (!userColumns.some((column) => column.name === "bio")) {
+        run("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
+    }
+
     const messageColumns = all("PRAGMA table_info(messages)");
     if (!messageColumns.some((column) => column.name === "reply_to_message_id")) {
         run("ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT");
     }
     run("CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id)");
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS profile_posts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            image_file_id TEXT NOT NULL,
+            caption TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_posts_user ON profile_posts(user_id, created_at);
+        CREATE TABLE IF NOT EXISTS stickers (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, file_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id, created_at);
+    `);
 }
 
 function getSetting(key) {
@@ -599,8 +687,8 @@ function ensureBootstrapAdmin() {
     const name = process.env.ADMIN_NAME || "Админ";
 
     run(
-        `INSERT INTO users (id, login, password_hash, name, tag, is_admin, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO users (id, login, password_hash, name, tag, role, is_admin, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'admin', 1, ?, ?)`,
         [makeId("user"), login, hashPassword(password), name, normalizeTag(login), createdAt, createdAt]
     );
 
@@ -611,7 +699,7 @@ function ensureInitialInvite() {
     const count = get("SELECT COUNT(*) AS count FROM invite_codes").count;
     if (count > 0) return;
 
-    const admin = get("SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at LIMIT 1");
+    const admin = get("SELECT id FROM users WHERE is_admin = 1 OR role = 'admin' ORDER BY created_at LIMIT 1");
     const code = process.env.INITIAL_INVITE_CODE || generateCode();
 
     run(
@@ -659,14 +747,14 @@ function requireChatMember(chatId, userId) {
 }
 
 function canManageChat(chatId, user) {
-    if (user.is_admin) return true;
+    if (isAdmin(user)) return true;
     const member = memberRow(chatId, user.id);
     return member && ["owner", "admin"].includes(member.role);
 }
 
 function getChatMembers(chatId) {
     return all(
-        `SELECT users.*, chat_members.role
+        `SELECT users.*, chat_members.role AS chat_role
          FROM chat_members
          JOIN users ON users.id = chat_members.user_id
          WHERE chat_members.chat_id = ?
@@ -705,7 +793,7 @@ function chatForUser(chat, currentUserId) {
         title,
         subtitle,
         avatar,
-        role: members.find((member) => member.id === currentUserId)?.role || null,
+        role: members.find((member) => member.id === currentUserId)?.chat_role || null,
         members: members.map(publicUser),
         latestMessage: latest ? messageForClient(latest, currentUserId, { includeDeleted: true }) : null,
         createdAt: chat.created_at,
@@ -845,7 +933,7 @@ function insertMessage(user, chatId, payload, options = {}) {
 
     if (fileId) {
         const file = get("SELECT * FROM files WHERE id = ?", [fileId]);
-        const hasFileAccess = options.allowAccessibleFile ? canAccessFile(user.id, fileId) : file?.owner_id === user.id;
+        const hasFileAccess = options.ownerOnly ? file?.owner_id === user.id : canAccessFile(user.id, fileId);
         if (!file || !hasFileAccess) {
             const error = new Error("Файл не найден");
             error.status = 404;
@@ -913,7 +1001,7 @@ function newsForClient(item, currentUserId) {
     const likesCount = get("SELECT COUNT(*) AS count FROM news_likes WHERE news_id = ?", [item.id]).count;
     const liked = Boolean(get("SELECT 1 FROM news_likes WHERE news_id = ? AND user_id = ?", [item.id, currentUserId]));
     const comments = all(
-        `SELECT news_comments.*, users.name, users.tag, users.avatar_file_id, users.login, users.is_admin, users.created_at AS user_created_at
+        `SELECT news_comments.*, users.name, users.tag, users.avatar_file_id, users.login, users.role, users.bio, users.is_admin, users.created_at AS user_created_at
          FROM news_comments
          JOIN users ON users.id = news_comments.user_id
          WHERE news_comments.news_id = ?
@@ -929,6 +1017,8 @@ function newsForClient(item, currentUserId) {
             name: comment.name,
             tag: comment.tag,
             avatar_file_id: comment.avatar_file_id,
+            role: comment.role,
+            bio: comment.bio,
             is_admin: comment.is_admin,
             created_at: comment.user_created_at,
         }),
@@ -946,6 +1036,7 @@ function newsForClient(item, currentUserId) {
         author: publicUser(author),
         likesCount,
         liked,
+        canManage: isAdmin(getUserById(currentUserId)) || item.author_id === currentUserId,
         comments,
         createdAt: item.created_at,
         updatedAt: item.updated_at,
@@ -977,6 +1068,7 @@ function canAccessFile(userId, fileId) {
     if (file.owner_id === userId) return true;
 
     if (get("SELECT 1 FROM users WHERE avatar_file_id = ?", [fileId])) return true;
+    if (get("SELECT 1 FROM stickers WHERE file_id = ? AND user_id = ?", [fileId, userId])) return true;
 
     if (
         get(
@@ -993,7 +1085,9 @@ function canAccessFile(userId, fileId) {
     }
 
     const news = all("SELECT id FROM news WHERE image_file_id = ?", [fileId]);
-    return news.some((item) => newsCanSee(item.id, userId));
+    if (news.some((item) => newsCanSee(item.id, userId))) return true;
+
+    return Boolean(get("SELECT 1 FROM profile_posts WHERE image_file_id = ?", [fileId]));
 }
 
 function sendPushToUsers(userIds, payload) {
@@ -1143,10 +1237,11 @@ app.post("/register", (req, res) => {
 
             const stamp = now();
             const id = makeId("user");
+            const role = normalizeRole(invite.role_on_signup);
             run(
-                `INSERT INTO users (id, login, password_hash, name, tag, is_admin, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [id, login, hashPassword(password), name, tag, invite.role_on_signup === "admin" ? 1 : 0, stamp, stamp]
+                `INSERT INTO users (id, login, password_hash, name, tag, role, is_admin, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [id, login, hashPassword(password), name, tag, role, role === "admin" ? 1 : 0, stamp, stamp]
             );
             run("UPDATE invite_codes SET used_count = used_count + 1 WHERE id = ?", [invite.id]);
             return getUserById(id);
@@ -1205,6 +1300,7 @@ app.get("/users", requireUser, (req, res) => {
 app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
     try {
         const name = String(req.body.name || "").trim().slice(0, 60);
+        const bio = String(req.body.bio || "").trim().slice(0, 500);
         const updates = [];
         const params = [];
 
@@ -1212,6 +1308,9 @@ app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
             updates.push("name = ?");
             params.push(name);
         }
+
+        updates.push("bio = ?");
+        params.push(bio);
 
         if (req.file) {
             const file = fileFromUpload(req.file, req.currentUser.id);
@@ -1231,7 +1330,68 @@ app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
     }
 });
 
-app.get("/admin/invites", requireAdmin, (req, res) => {
+function profilePostForClient(post) {
+    const file = get("SELECT * FROM files WHERE id = ?", [post.image_file_id]);
+    return {
+        id: post.id,
+        caption: post.caption || "",
+        image: publicFile(file),
+        createdAt: post.created_at,
+    };
+}
+
+function profileForClient(user) {
+    return {
+        user: publicUser(user),
+        posts: all(
+            "SELECT * FROM profile_posts WHERE user_id = ? ORDER BY created_at DESC",
+            [user.id]
+        ).map(profilePostForClient),
+    };
+}
+
+app.get("/profiles/:id", requireUser, (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+    res.json(profileForClient(user));
+});
+
+app.post("/profile/posts", requireUser, upload.single("image"), (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: "Выберите фотографию" });
+        if (!String(req.file.mimetype || "").startsWith("image/")) {
+            return res.status(400).json({ error: "В профиль можно добавить только фото" });
+        }
+
+        const caption = String(req.body.caption || "").trim().slice(0, 600);
+        const post = tx(() => {
+            const file = fileFromUpload(req.file, req.currentUser.id);
+            const id = makeId("post");
+            run(
+                `INSERT INTO profile_posts (id, user_id, image_file_id, caption, created_at)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [id, req.currentUser.id, file.id, caption, now()]
+            );
+            return get("SELECT * FROM profile_posts WHERE id = ?", [id]);
+        });
+
+        res.status(201).json(profilePostForClient(post));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.delete("/profile/posts/:id", requireUser, (req, res) => {
+    const post = get("SELECT * FROM profile_posts WHERE id = ?", [req.params.id]);
+    if (!post) return res.status(404).json({ error: "Пост не найден" });
+    if (post.user_id !== req.currentUser.id && !isAdmin(req.currentUser)) {
+        return res.status(403).json({ error: "Можно удалять только свои посты" });
+    }
+    run("DELETE FROM profile_posts WHERE id = ?", [post.id]);
+    res.json({ success: true });
+});
+
+app.get("/admin/invites", requirePublisher, (req, res) => {
     res.json(
         all(
             `SELECT invite_codes.*, users.name AS creator_name
@@ -1242,10 +1402,11 @@ app.get("/admin/invites", requireAdmin, (req, res) => {
     );
 });
 
-app.post("/admin/invites", requireAdmin, (req, res) => {
+app.post("/admin/invites", requirePublisher, (req, res) => {
     const maxUses = Math.max(1, Math.min(50, Number(req.body.maxUses || 1)));
     const expiresDays = Number(req.body.expiresDays || 0);
-    const role = req.body.role === "admin" ? "admin" : "user";
+    const requestedRole = normalizeRole(String(req.body.role || "user"));
+    const role = isAdmin(req.currentUser) ? requestedRole : "user";
     const code = generateCode();
     const expiresAt = expiresDays > 0 ? new Date(Date.now() + expiresDays * 86400 * 1000).toISOString() : null;
 
@@ -1256,6 +1417,23 @@ app.post("/admin/invites", requireAdmin, (req, res) => {
     );
 
     res.status(201).json({ code, maxUses, expiresAt, role });
+});
+
+app.patch("/admin/users/:id/role", requireAdmin, (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+
+    const role = normalizeRole(String(req.body.role || "user"));
+    if (user.id === req.currentUser.id && role !== "admin") {
+        return res.status(400).json({ error: "Нельзя снять роль админа с самого себя" });
+    }
+
+    run(
+        "UPDATE users SET role = ?, is_admin = ?, updated_at = ? WHERE id = ?",
+        [role, role === "admin" ? 1 : 0, now(), user.id]
+    );
+    run("DELETE FROM sessions WHERE user_id = ? AND ? = 0", [user.id, role === userRole(user) ? 1 : 0]);
+    res.json(publicUser(getUserById(user.id)));
 });
 
 app.post("/admin/users/:id/reset-password", requireAdmin, (req, res) => {
@@ -1292,12 +1470,73 @@ app.get("/files/:id", requireUser, (req, res) => {
     }
 
     const disposition = req.query.download === "1" ? "attachment" : "inline";
+    const stat = fs.statSync(absolutePath);
+    const range = req.headers.range;
     res.setHeader("Content-Type", file.mime_type);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "private, max-age=604800");
     res.setHeader(
         "Content-Disposition",
         `${disposition}; filename*=UTF-8''${encodeURIComponent(file.original_name)}`
     );
+
+    if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (match) {
+            const start = match[1] ? Number(match[1]) : 0;
+            const end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+            if (Number.isInteger(start) && Number.isInteger(end) && start <= end && start < stat.size) {
+                res.status(206);
+                res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
+                res.setHeader("Content-Length", end - start + 1);
+                fs.createReadStream(absolutePath, { start, end }).pipe(res);
+                return;
+            }
+        }
+        res.status(416).setHeader("Content-Range", `bytes */${stat.size}`);
+        return res.end();
+    }
+
+    res.setHeader("Content-Length", stat.size);
     fs.createReadStream(absolutePath).pipe(res);
+});
+
+function stickerForClient(sticker) {
+    const file = get("SELECT * FROM files WHERE id = ?", [sticker.file_id]);
+    return {
+        id: sticker.id,
+        file: publicFile(file),
+        createdAt: sticker.created_at,
+    };
+}
+
+app.get("/stickers", requireUser, (req, res) => {
+    res.json(
+        all(
+            "SELECT * FROM stickers WHERE user_id = ? ORDER BY created_at DESC",
+            [req.currentUser.id]
+        ).map(stickerForClient)
+    );
+});
+
+app.post("/stickers", requireUser, (req, res) => {
+    const fileId = String(req.body.fileId || "");
+    const file = get("SELECT * FROM files WHERE id = ?", [fileId]);
+    if (!file || !canAccessFile(req.currentUser.id, file.id)) {
+        return res.status(404).json({ error: "Файл не найден" });
+    }
+    if (!String(file.mime_type || "").startsWith("image/")) {
+        return res.status(400).json({ error: "Стикером может быть только картинка" });
+    }
+
+    const id = makeId("sticker");
+    run(
+        `INSERT OR IGNORE INTO stickers (id, user_id, file_id, created_at)
+         VALUES (?, ?, ?, ?)`,
+        [id, req.currentUser.id, file.id, now()]
+    );
+    const sticker = get("SELECT * FROM stickers WHERE user_id = ? AND file_id = ?", [req.currentUser.id, file.id]);
+    res.status(201).json(stickerForClient(sticker));
 });
 
 app.get("/chats", requireUser, (req, res) => {
@@ -1514,7 +1753,7 @@ app.get("/news", requireUser, (req, res) => {
     res.json(items);
 });
 
-app.post("/news", requireAdmin, upload.single("image"), (req, res) => {
+app.post("/news", requirePublisher, upload.single("image"), (req, res) => {
     try {
         const text = String(req.body.text || "").trim().slice(0, 4000);
         const visibility = req.body.visibility === "selected" ? "selected" : "all";
@@ -1550,10 +1789,13 @@ app.post("/news", requireAdmin, upload.single("image"), (req, res) => {
     }
 });
 
-app.put("/news/:id", requireAdmin, upload.single("image"), (req, res) => {
+app.put("/news/:id", requirePublisher, upload.single("image"), (req, res) => {
     try {
         const item = get("SELECT * FROM news WHERE id = ?", [req.params.id]);
         if (!item) return res.status(404).json({ error: "Новость не найдена" });
+        if (!isAdmin(req.currentUser) && item.author_id !== req.currentUser.id) {
+            return res.status(403).json({ error: "Можно редактировать только свои новости" });
+        }
 
         const text = String(req.body.text || "").trim().slice(0, 4000);
         const visibility = req.body.visibility === "selected" ? "selected" : "all";
@@ -1583,9 +1825,12 @@ app.put("/news/:id", requireAdmin, upload.single("image"), (req, res) => {
     }
 });
 
-app.delete("/news/:id", requireAdmin, (req, res) => {
+app.delete("/news/:id", requirePublisher, (req, res) => {
     const item = get("SELECT * FROM news WHERE id = ?", [req.params.id]);
     if (!item) return res.status(404).json({ error: "Новость не найдена" });
+    if (!isAdmin(req.currentUser) && item.author_id !== req.currentUser.id) {
+        return res.status(403).json({ error: "Можно удалять только свои новости" });
+    }
     run("DELETE FROM news WHERE id = ?", [item.id]);
     res.json({ success: true });
 });

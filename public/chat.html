@@ -15,6 +15,7 @@
                 <strong id="headerName">Messenger</strong>
                 <span id="headerTag"></span>
             </div>
+            <button class="ghost-button icon-only" id="themeButton" type="button" aria-label="Тема"></button>
             <button class="ghost-button" id="logoutButton" type="button">Выйти</button>
         </header>
 
@@ -68,11 +69,12 @@
                                 <button type="button" id="clearAttachment">×</button>
                             </div>
                             <form class="message-form" id="messageForm">
-                                <label class="icon-button" for="messageFile">+</label>
+                                <button class="icon-button" type="button" id="stickerButton" aria-label="Стикеры"></button>
+                                <label class="icon-button" for="messageFile" aria-label="Прикрепить файл"></label>
                                 <input type="file" id="messageFile" hidden>
-                                <button class="icon-button" type="button" id="voiceButton">●</button>
+                                <button class="icon-button" type="button" id="voiceButton" aria-label="Голосовое"></button>
                                 <input type="text" id="messageText" placeholder="Сообщение">
-                                <button class="send-button" type="submit">↑</button>
+                                <button class="send-button" type="submit" aria-label="Отправить"></button>
                             </form>
                         </div>
                     </section>
@@ -123,6 +125,7 @@
                             <input type="number" name="expiresDays" min="0" value="7" placeholder="Дней">
                             <select name="role">
                                 <option value="user">Пользователь</option>
+                                <option value="subadmin">Под-админ</option>
                                 <option value="admin">Админ</option>
                             </select>
                         </div>
@@ -132,8 +135,8 @@
                         <div class="section-title">Готовые инвайты</div>
                         <div id="inviteList" class="invite-list"></div>
                     </div>
-                    <div class="admin-card">
-                        <div class="section-title">Сброс пароля</div>
+                    <div class="admin-card" id="adminUsersCard">
+                        <div class="section-title">Пользователи и роли</div>
                         <div id="adminUsers" class="people-list"></div>
                     </div>
                 </div>
@@ -157,6 +160,7 @@
             <div class="action-sheet-title" id="messageActionTitle">Сообщение</div>
             <button type="button" data-message-action="reply">Ответить</button>
             <button type="button" data-message-action="forward">Переслать</button>
+            <button type="button" data-message-action="create-sticker">Создать стикер</button>
             <button type="button" data-message-action="edit">Изменить</button>
             <button type="button" data-message-action="delete-me">Удалить у себя</button>
             <button type="button" data-message-action="delete-all">Удалить у всех</button>
@@ -173,6 +177,18 @@
                 <button class="icon-button" type="button" id="closeForwardButton" aria-label="Закрыть">×</button>
             </div>
             <div id="forwardTargets" class="forward-targets"></div>
+        </div>
+
+        <div class="modal-scrim hidden" id="stickerScrim"></div>
+        <div class="forward-panel hidden" id="stickerPanel">
+            <div class="group-panel-head">
+                <div>
+                    <strong>Стикеры</strong>
+                    <span>Сохранённые картинки</span>
+                </div>
+                <button class="icon-button" type="button" id="closeStickerButton" aria-label="Закрыть">×</button>
+            </div>
+            <div id="stickerList" class="sticker-list"></div>
         </div>
     </div>
 

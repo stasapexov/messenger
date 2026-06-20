@@ -9,6 +9,8 @@ const state = {
     replyToMessage: null,
     actionMessage: null,
     forwardingMessage: null,
+    profileUserId: null,
+    stickers: [],
     editingNewsId: null,
     voiceStream: null,
     voiceContext: null,
@@ -23,6 +25,7 @@ const els = {
     headerAvatar: document.getElementById("headerAvatar"),
     headerName: document.getElementById("headerName"),
     headerTag: document.getElementById("headerTag"),
+    themeButton: document.getElementById("themeButton"),
     logoutButton: document.getElementById("logoutButton"),
     chatLayout: document.querySelector(".chat-layout"),
     chatList: document.getElementById("chatList"),
@@ -47,6 +50,7 @@ const els = {
     messageForm: document.getElementById("messageForm"),
     messageText: document.getElementById("messageText"),
     messageFile: document.getElementById("messageFile"),
+    stickerButton: document.getElementById("stickerButton"),
     attachmentPreview: document.getElementById("attachmentPreview"),
     attachmentName: document.getElementById("attachmentName"),
     clearAttachment: document.getElementById("clearAttachment"),
@@ -67,6 +71,7 @@ const els = {
     peopleList: document.getElementById("peopleList"),
     inviteForm: document.getElementById("inviteForm"),
     inviteList: document.getElementById("inviteList"),
+    adminUsersCard: document.getElementById("adminUsersCard"),
     adminUsers: document.getElementById("adminUsers"),
     profilePanel: document.getElementById("profilePanel"),
     messageActionScrim: document.getElementById("messageActionScrim"),
@@ -76,7 +81,25 @@ const els = {
     forwardPanel: document.getElementById("forwardPanel"),
     closeForwardButton: document.getElementById("closeForwardButton"),
     forwardTargets: document.getElementById("forwardTargets"),
+    stickerScrim: document.getElementById("stickerScrim"),
+    stickerPanel: document.getElementById("stickerPanel"),
+    closeStickerButton: document.getElementById("closeStickerButton"),
+    stickerList: document.getElementById("stickerList"),
 };
+
+function icon(name) {
+    const icons = {
+        paperclip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.6l-8.2 8.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.7 8.7a2 2 0 0 1-2.8-2.8l8-8"/></svg>',
+        mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg>',
+        send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg>',
+        sticker: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a4 4 0 0 1 4 4v7l-7 7H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Z"/><path d="M14 21v-4a3 3 0 0 1 3-3h4"/><path d="M8 9h.01M16 9h.01M8.5 14a5 5 0 0 0 7 0"/></svg>',
+        moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a9 9 0 1 0 11.5 11.5Z"/></svg>',
+        sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+        heart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg>',
+        download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+    };
+    return icons[name] || "";
+}
 
 async function api(path, options = {}) {
     const request = { credentials: "same-origin", ...options };
@@ -138,6 +161,31 @@ function messageSnippet(message, fallback = "Сообщение") {
     return text ? text.slice(0, 120) : fallback;
 }
 
+function canPublish() {
+    return Boolean(state.me?.canPublish || state.me?.isAdmin || state.me?.isSubadmin);
+}
+
+function roleLabel(role) {
+    return { admin: "Админ", subadmin: "Под-админ", user: "Пользователь" }[role] || "Пользователь";
+}
+
+function applyTheme(theme = localStorage.getItem("messengerTheme") || "light") {
+    const nextTheme = theme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = nextTheme;
+    localStorage.setItem("messengerTheme", nextTheme);
+    if (els.themeButton) els.themeButton.innerHTML = icon(nextTheme === "dark" ? "sun" : "moon");
+}
+
+function setupStaticIcons() {
+    const fileLabel = document.querySelector('label[for="messageFile"]');
+    if (fileLabel) fileLabel.innerHTML = icon("paperclip");
+    if (els.voiceButton) els.voiceButton.innerHTML = icon("mic");
+    if (els.stickerButton) els.stickerButton.innerHTML = icon("sticker");
+    const sendButton = document.querySelector(".send-button");
+    if (sendButton) sendButton.innerHTML = icon("send");
+    applyTheme();
+}
+
 function avatarContent(item) {
     const avatar = item?.avatar;
     if (avatar) return `<img src="${avatar}" alt="">`;
@@ -148,21 +196,22 @@ function avatarContent(item) {
 function renderHeader() {
     els.headerAvatar.innerHTML = avatarContent(state.me);
     els.headerName.textContent = state.me?.name || "Messenger";
-    els.headerTag.textContent = state.me?.tag ? `@${state.me.tag}` : "";
-    document.querySelectorAll(".admin-only").forEach((item) => item.classList.toggle("hidden", !state.me?.isAdmin));
-    document.getElementById("viewAdmin").classList.toggle("hidden-admin", !state.me?.isAdmin);
-    els.newsForm.classList.toggle("hidden", !state.me?.isAdmin);
+    els.headerTag.textContent = state.me?.tag ? `@${state.me.tag} · ${roleLabel(state.me.role)}` : "";
+    document.querySelectorAll(".admin-only").forEach((item) => item.classList.toggle("hidden", !canPublish()));
+    document.getElementById("viewAdmin").classList.toggle("hidden-admin", !canPublish());
+    els.newsForm.classList.toggle("hidden", !canPublish());
+    els.inviteForm.elements.role.disabled = !state.me?.isAdmin;
 }
 
 function switchView(viewId) {
-    if (viewId === "viewAdmin" && !state.me?.isAdmin) return;
+    if (viewId === "viewAdmin" && !canPublish()) return;
 
     document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === viewId));
     document.querySelectorAll(".nav-button").forEach((button) => button.classList.toggle("active", button.dataset.view === viewId));
 
     if (viewId === "viewFeed") loadNews();
     if (viewId === "viewPeople") renderPeople();
-    if (viewId === "viewProfile") renderProfile();
+    if (viewId === "viewProfile") loadProfile(state.profileUserId || state.me?.id).catch((error) => alert(error.message));
     if (viewId === "viewAdmin") loadAdmin();
 }
 
@@ -249,6 +298,11 @@ function setChatOpen(isOpen) {
     els.chatLayout.classList.toggle("chat-open", Boolean(isOpen));
 }
 
+function chatProfileUser(chat) {
+    if (!chat || chat.type !== "direct") return null;
+    return chat.members?.find((member) => member.id !== state.me?.id) || null;
+}
+
 async function selectChat(chatId) {
     const chat = state.chats.find((item) => item.id === chatId) || (await api("/chats")).find((item) => item.id === chatId);
     if (!chat) return;
@@ -261,6 +315,9 @@ async function selectChat(chatId) {
     els.emptyChat.classList.add("hidden");
     els.chatRoom.classList.remove("hidden");
     els.chatAvatar.innerHTML = avatarContent(chat);
+    const profileUser = chatProfileUser(chat);
+    els.chatAvatar.dataset.userId = profileUser?.id || "";
+    els.chatAvatar.classList.toggle("clickable", Boolean(profileUser));
     els.chatTitle.textContent = chat.title;
     els.chatSubtitle.textContent = chat.subtitle || "";
     await loadMessages();
@@ -325,24 +382,57 @@ function isMessageControl(target) {
 function bindMessageActions(item, message) {
     let longPress = null;
     let longPressOpened = false;
+    let startX = 0;
+    let startY = 0;
+    let swipeHandled = false;
 
     item.addEventListener("pointerdown", (event) => {
         if (isMessageControl(event.target)) return;
         longPressOpened = false;
+        swipeHandled = false;
+        startX = event.clientX;
+        startY = event.clientY;
         longPress = window.setTimeout(() => {
             longPressOpened = true;
             openMessageActions(message);
         }, 460);
     });
 
+    item.addEventListener("pointermove", (event) => {
+        if (isMessageControl(event.target) || !startX) return;
+        const dx = event.clientX - startX;
+        const dy = Math.abs(event.clientY - startY);
+        if (Math.abs(dx) > 10 && longPress) window.clearTimeout(longPress);
+        if (dx > 0 && dy < 42) {
+            const offset = Math.min(dx, 72);
+            item.style.transform = `translateX(${offset}px)`;
+            item.classList.toggle("swipe-ready", offset > 56);
+        }
+    });
+
     ["pointerup", "pointerleave", "pointercancel"].forEach((eventName) => {
-        item.addEventListener(eventName, () => {
+        item.addEventListener(eventName, (event) => {
             if (longPress) window.clearTimeout(longPress);
+            if (!startX) return;
+            const dx = event.clientX - startX;
+            const dy = Math.abs(event.clientY - startY);
+            item.style.transform = "";
+            item.classList.remove("swipe-ready");
+            if (eventName === "pointerup" && dx > 58 && dy < 42 && !longPressOpened) {
+                swipeHandled = true;
+                setReplyToMessage(message);
+            }
+            startX = 0;
+            startY = 0;
         });
     });
 
     item.addEventListener("click", (event) => {
         if (isMessageControl(event.target)) return;
+        if (swipeHandled) {
+            swipeHandled = false;
+            return;
+        }
         if (longPressOpened) {
             longPressOpened = false;
             return;
@@ -376,6 +466,9 @@ function openMessageActions(message) {
     els.messageActionTitle.textContent = messageSnippet(message);
     els.messageActionSheet.querySelector('[data-message-action="edit"]').classList.toggle("hidden", !message.canEdit);
     els.messageActionSheet.querySelector('[data-message-action="delete-all"]').classList.toggle("hidden", !message.canDeleteAll);
+    els.messageActionSheet
+        .querySelector('[data-message-action="create-sticker"]')
+        .classList.toggle("hidden", message.attachment?.type !== "image");
     els.messageActionScrim.classList.remove("hidden");
     els.messageActionSheet.classList.remove("hidden");
 }
@@ -448,6 +541,56 @@ async function forwardMessageToUser(userId) {
     if (result.chat?.id) await selectChat(result.chat.id);
 }
 
+async function loadStickers() {
+    state.stickers = await api("/stickers");
+}
+
+function renderStickers() {
+    els.stickerList.innerHTML = "";
+    if (!state.stickers.length) {
+        els.stickerList.innerHTML = `<div class="empty-state compact">Зажмите картинку в чате и создайте первый стикер</div>`;
+        return;
+    }
+
+    state.stickers.forEach((sticker) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sticker-item";
+        button.dataset.fileId = sticker.file.id;
+        button.innerHTML = `<img src="${sticker.file.url}" alt="">`;
+        els.stickerList.appendChild(button);
+    });
+}
+
+async function openStickerPanel() {
+    if (!state.selectedChat) return;
+    await loadStickers();
+    renderStickers();
+    els.stickerScrim.classList.remove("hidden");
+    els.stickerPanel.classList.remove("hidden");
+}
+
+function closeStickerPanel() {
+    els.stickerScrim.classList.add("hidden");
+    els.stickerPanel.classList.add("hidden");
+}
+
+async function sendSticker(fileId) {
+    if (!state.selectedChat || !fileId) return;
+    const payload = {
+        chatId: state.selectedChat.id,
+        text: "",
+        fileId,
+        kind: "file",
+        replyToMessageId: state.replyToMessage?.id || null,
+    };
+    socket.emit("sendMessage", payload, (response) => {
+        if (!response?.success) alert(response?.error || "Не удалось отправить стикер");
+    });
+    clearReplyToMessage();
+    closeStickerPanel();
+}
+
 async function handleMessageAction(action) {
     const message = state.actionMessage;
     if (!message || action === "cancel") {
@@ -475,21 +618,27 @@ async function handleMessageAction(action) {
     }
     if (action === "delete-all") {
         await deleteMessage(message.id, "all");
+        return;
+    }
+    if (action === "create-sticker") {
+        await api("/stickers", { method: "POST", body: { fileId: message.attachment?.id } });
+        await loadStickers();
+        alert("Стикер сохранён");
     }
 }
 
 function attachmentHtml(attachment, kind) {
     if (attachment.type === "image") {
-        return `<a class="attachment image" href="${attachment.url}" target="_blank" rel="noreferrer"><img src="${attachment.url}" alt=""><span>${escapeHtml(attachment.originalName)}</span></a>`;
+        return `<a class="attachment image" href="${attachment.url}" target="_blank" rel="noreferrer" data-file-id="${escapeHtml(attachment.id)}"><img src="${attachment.url}" alt=""><span>${escapeHtml(attachment.originalName)}</span></a>`;
     }
     if (attachment.type === "video") {
-        return `<div class="attachment media-attachment"><div class="media-player video-player"><video src="${attachment.url}" controls preload="metadata" playsinline></video></div><a class="attachment-link" href="${attachment.url}?download=1">${escapeHtml(attachment.originalName)} - ${fileSize(attachment.size)}</a></div>`;
+        return `<div class="attachment media-attachment"><div class="media-player video-player"><video src="${attachment.url}" controls preload="metadata" playsinline webkit-playsinline data-cache-url="${attachment.url}"></video></div><div class="attachment-tools"><a class="attachment-link" href="${attachment.url}?download=1">${escapeHtml(attachment.originalName)} - ${fileSize(attachment.size)}</a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
     }
     if (attachment.type === "audio" || kind === "voice") {
         const title = kind === "voice" ? "Голосовое" : escapeHtml(attachment.originalName);
-        return `<div class="attachment media-attachment"><div class="media-player audio-player"><audio class="media-native" src="${attachment.url}" controls preload="metadata" playsinline></audio></div><a class="attachment-link" href="${attachment.url}?download=1">${title}${attachment.size ? ` - ${fileSize(attachment.size)}` : ""}</a></div>`;
+        return `<div class="attachment media-attachment"><div class="media-player audio-player"><audio class="media-native" src="${attachment.url}" controls preload="metadata" playsinline data-cache-url="${attachment.url}"></audio></div><div class="attachment-tools"><a class="attachment-link" href="${attachment.url}?download=1">${title}${attachment.size ? ` - ${fileSize(attachment.size)}` : ""}</a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
     }
-    return `<a class="attachment file" href="${attachment.url}?download=1"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a>`;
+    return `<div class="attachment file"><a class="attachment-link" href="${attachment.url}?download=1"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
 }
 
 function pauseOtherMedia(currentMedia) {
@@ -498,10 +647,51 @@ function pauseOtherMedia(currentMedia) {
     });
 }
 
+async function cachedBlobUrl(url) {
+    if (!("caches" in window) || !url) return null;
+    const cache = await caches.open("messenger-media-v1");
+    const cached = await cache.match(url);
+    if (!cached) return null;
+    return URL.createObjectURL(await cached.blob());
+}
+
+async function cacheMediaUrl(url, button) {
+    if (!("caches" in window)) throw new Error("Браузер не поддерживает локальный кэш");
+    const cache = await caches.open("messenger-media-v1");
+    button?.classList.add("is-loading");
+    const response = await fetch(url, { credentials: "same-origin" });
+    if (!response.ok) throw new Error("Не удалось сохранить файл");
+    await cache.put(url, response.clone());
+    button?.classList.remove("is-loading");
+    button?.classList.add("is-cached");
+}
+
 function setupMediaPlayers(root = document) {
     root.querySelectorAll(".media-player audio:not([data-ready]), .media-player video:not([data-ready])").forEach((media) => {
         media.dataset.ready = "1";
         media.addEventListener("play", () => pauseOtherMedia(media));
+        cachedBlobUrl(media.dataset.cacheUrl)
+            .then((localUrl) => {
+                if (localUrl && !media.dataset.localReady && media.paused) {
+                    media.dataset.localReady = "1";
+                    media.src = localUrl;
+                    media.load();
+                }
+            })
+            .catch(() => {});
+    });
+    root.querySelectorAll(".cache-button:not([data-ready])").forEach((button) => {
+        button.dataset.ready = "1";
+        button.addEventListener("click", async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                await cacheMediaUrl(button.dataset.cacheUrl, button);
+            } catch (error) {
+                button.classList.remove("is-loading");
+                alert(error.message);
+            }
+        });
     });
 }
 
@@ -609,16 +799,35 @@ function renderPeople() {
 function userCard(user, adminMode = false) {
     const row = document.createElement("div");
     row.className = "person-row";
+    const roleControl = adminMode && state.me?.isAdmin
+        ? `<select class="role-select" data-role>
+                <option value="user" ${user.role === "user" ? "selected" : ""}>Пользователь</option>
+                <option value="subadmin" ${user.role === "subadmin" ? "selected" : ""}>Под-админ</option>
+                <option value="admin" ${user.role === "admin" ? "selected" : ""}>Админ</option>
+           </select>`
+        : `<small>${roleLabel(user.role)}</small>`;
     row.innerHTML = `
-        <div class="avatar-button small">${avatarContent(user)}</div>
+        <button class="avatar-button small profile-link" type="button" data-profile="${escapeHtml(user.id)}">${avatarContent(user)}</button>
         <div class="person-main">
             <strong>${escapeHtml(user.name)}</strong>
-            <span>@${escapeHtml(user.tag)}</span>
+            <span>@${escapeHtml(user.tag)} · ${roleLabel(user.role)}</span>
+            ${adminMode ? roleControl : ""}
         </div>
-        <button type="button">${adminMode ? "Сброс" : "Написать"}</button>
+        <button type="button" data-user-action>${adminMode ? "Сброс" : "Написать"}</button>
     `;
-    row.querySelector("button").addEventListener("click", async () => {
+    row.querySelector("[data-profile]").addEventListener("click", () => openUserProfile(user.id));
+    row.querySelector("[data-role]")?.addEventListener("change", async (event) => {
+        const updated = await api(`/admin/users/${user.id}/role`, {
+            method: "PATCH",
+            body: { role: event.currentTarget.value },
+        });
+        Object.assign(user, updated);
+        await loadUsers();
+        await loadAdmin();
+    });
+    row.querySelector("[data-user-action]").addEventListener("click", async () => {
         if (adminMode) {
+            if (!state.me?.isAdmin) return;
             const password = prompt("Новый пароль. Оставьте пустым, чтобы сервер сгенерировал временный пароль", "");
             const body = password ? { password } : {};
             const result = await api(`/admin/users/${user.id}/reset-password`, { method: "POST", body });
@@ -667,8 +876,8 @@ function renderNews(news) {
                 </div>
                 <p>${escapeHtml(item.text)}</p>
                 <div class="news-actions">
-                    <button type="button" data-action="like">${item.liked ? "Нравится" : "Лайк"} · ${item.likesCount}</button>
-                    ${state.me.isAdmin ? '<button type="button" data-action="edit">Изм.</button><button type="button" data-action="delete">Удалить</button>' : ""}
+                    <button class="heart-button ${item.liked ? "active" : ""}" type="button" data-action="like" aria-label="Сердце">${icon("heart")}<span>${item.likesCount}</span></button>
+                    ${item.canManage ? '<button type="button" data-action="edit">Изм.</button><button type="button" data-action="delete">Удалить</button>' : ""}
                 </div>
                 <div class="comments"></div>
                 <form class="comment-form">
@@ -744,14 +953,17 @@ async function saveNews(event) {
 }
 
 async function loadAdmin() {
-    if (!state.me.isAdmin) return;
+    if (!canPublish()) return;
     const invites = await api("/admin/invites");
     els.inviteList.innerHTML = invites.length
-        ? invites.map((invite) => `<div class="invite-row"><strong>${escapeHtml(invite.code)}</strong><span>${invite.used_count}/${invite.max_uses}</span></div>`).join("")
+        ? invites.map((invite) => `<div class="invite-row"><strong>${escapeHtml(invite.code)}</strong><span>${roleLabel(invite.role_on_signup)} · ${invite.used_count}/${invite.max_uses}</span></div>`).join("")
         : `<div class="empty-state compact">Инвайтов пока нет</div>`;
 
-    els.adminUsers.innerHTML = "";
-    state.users.forEach((user) => els.adminUsers.appendChild(userCard(user, true)));
+    els.adminUsersCard.classList.toggle("hidden", !state.me?.isAdmin);
+    if (state.me?.isAdmin) {
+        els.adminUsers.innerHTML = "";
+        state.users.forEach((user) => els.adminUsers.appendChild(userCard(user, true)));
+    }
 }
 
 async function createInvite(event) {
@@ -760,27 +972,86 @@ async function createInvite(event) {
     const invite = await api("/admin/invites", { method: "POST", body });
     alert(`Инвайт: ${invite.code}`);
     els.inviteForm.reset();
+    els.inviteForm.elements.role.value = "user";
     await loadAdmin();
 }
 
-function renderProfile() {
+async function loadProfile(userId = state.me?.id) {
+    if (!userId) return;
+    state.profileUserId = userId;
+    const profile = await api(`/profiles/${encodeURIComponent(userId)}`);
+    renderProfile(profile);
+}
+
+function openUserProfile(userId = state.me?.id) {
+    state.profileUserId = userId;
+    switchView("viewProfile");
+}
+
+function profilePostsHtml(profile, canManage) {
+    if (!profile.posts?.length) return `<div class="empty-state compact">Фотографий пока нет</div>`;
+    return profile.posts
+        .map((post) => `
+            <article class="profile-post" data-post-id="${escapeHtml(post.id)}">
+                <img src="${post.image.url}" alt="">
+                ${post.caption ? `<p>${escapeHtml(post.caption)}</p>` : ""}
+                ${canManage ? '<button class="ghost-button" type="button" data-delete-post>Удалить</button>' : ""}
+            </article>
+        `)
+        .join("");
+}
+
+function renderProfile(profile = { user: state.me, posts: [] }) {
+    const user = profile.user || state.me;
+    const isSelf = user.id === state.me?.id;
+    const canManagePosts = isSelf || state.me?.isAdmin;
     els.profilePanel.innerHTML = `
         <div class="profile-hero">
-            <div class="profile-avatar">${avatarContent(state.me)}</div>
-            <h2>${escapeHtml(state.me.name)}</h2>
-            <p>@${escapeHtml(state.me.tag)}</p>
-            ${state.me.isAdmin ? '<span class="role-badge">Админ</span>' : ""}
+            <div class="profile-avatar">${avatarContent(user)}</div>
+            <h2>${escapeHtml(user.name)}</h2>
+            <p>@${escapeHtml(user.tag)}</p>
+            ${user.bio ? `<p class="profile-bio">${escapeHtml(user.bio)}</p>` : ""}
+            <span class="role-badge">${roleLabel(user.role)}</span>
         </div>
-        <form class="profile-form" id="profileForm">
-            <input type="text" name="name" value="${escapeHtml(state.me.name)}" maxlength="60" required>
-            <input type="file" name="avatar" accept="image/*">
-            <button type="submit">Сохранить профиль</button>
-        </form>
-        <button type="button" id="enablePushButton">Включить уведомления</button>
+        ${
+            isSelf
+                ? `<form class="profile-form" id="profileForm">
+                    <input type="text" name="name" value="${escapeHtml(state.me.name)}" maxlength="60" required>
+                    <textarea name="bio" rows="3" maxlength="500" placeholder="Описание профиля">${escapeHtml(state.me.bio || "")}</textarea>
+                    <input type="file" name="avatar" accept="image/*">
+                    <button type="submit">Сохранить профиль</button>
+                </form>
+                <form class="profile-form" id="profilePostForm">
+                    <input type="file" name="image" accept="image/*" required>
+                    <input type="text" name="caption" maxlength="600" placeholder="Подпись к фото">
+                    <button type="submit">Опубликовать фото</button>
+                </form>
+                <button type="button" id="enablePushButton">Включить уведомления</button>`
+                : `<button type="button" id="messageProfileButton">Написать</button>`
+        }
+        <section class="profile-posts">
+            <div class="section-title">Фотографии</div>
+            ${profilePostsHtml(profile, canManagePosts)}
+        </section>
     `;
 
-    document.getElementById("profileForm").addEventListener("submit", saveProfile);
-    document.getElementById("enablePushButton").addEventListener("click", enablePush);
+    document.getElementById("profileForm")?.addEventListener("submit", saveProfile);
+    document.getElementById("profilePostForm")?.addEventListener("submit", uploadProfilePost);
+    document.getElementById("enablePushButton")?.addEventListener("click", enablePush);
+    document.getElementById("messageProfileButton")?.addEventListener("click", async () => {
+        const chat = await api("/chats/direct", { method: "POST", body: { userId: user.id } });
+        await loadChats();
+        switchView("viewChats");
+        await selectChat(chat.id);
+    });
+    els.profilePanel.querySelectorAll("[data-delete-post]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const post = button.closest("[data-post-id]");
+            if (!post || !confirm("Удалить фото из профиля?")) return;
+            await api(`/profile/posts/${post.dataset.postId}`, { method: "DELETE" });
+            await loadProfile(user.id);
+        });
+    });
 }
 
 async function saveProfile(event) {
@@ -788,7 +1059,14 @@ async function saveProfile(event) {
     const updated = await api("/profile", { method: "PUT", body: new FormData(event.currentTarget) });
     state.me = updated;
     renderHeader();
-    renderProfile();
+    await loadProfile(state.me.id);
+}
+
+async function uploadProfilePost(event) {
+    event.preventDefault();
+    await api("/profile/posts", { method: "POST", body: new FormData(event.currentTarget) });
+    event.currentTarget.reset();
+    await loadProfile(state.me.id);
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -930,8 +1208,17 @@ async function logout() {
     window.location = "index.html";
 }
 
-document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
-els.headerAvatar.addEventListener("click", () => switchView("viewProfile"));
+document.querySelectorAll(".nav-button").forEach((button) =>
+    button.addEventListener("click", () => {
+        if (button.dataset.view === "viewProfile") state.profileUserId = state.me?.id;
+        switchView(button.dataset.view);
+    })
+);
+els.headerAvatar.addEventListener("click", () => openUserProfile(state.me?.id));
+els.chatAvatar.addEventListener("click", () => {
+    if (els.chatAvatar.dataset.userId) openUserProfile(els.chatAvatar.dataset.userId);
+});
+els.themeButton.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 els.logoutButton.addEventListener("click", logout);
 els.refreshChatsButton.addEventListener("click", loadChats);
 els.openGroupPanelButton.addEventListener("click", openGroupForm);
@@ -948,6 +1235,14 @@ els.messageActionSheet.addEventListener("click", (event) => {
 els.clearReplyButton.addEventListener("click", clearReplyToMessage);
 els.forwardScrim.addEventListener("click", closeForwardPanel);
 els.closeForwardButton.addEventListener("click", closeForwardPanel);
+els.stickerButton.addEventListener("click", () => openStickerPanel().catch((error) => alert(error.message)));
+els.stickerScrim.addEventListener("click", closeStickerPanel);
+els.closeStickerButton.addEventListener("click", closeStickerPanel);
+els.stickerList.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-file-id]");
+    if (!target) return;
+    sendSticker(target.dataset.fileId).catch((error) => alert(error.message));
+});
 els.forwardTargets.addEventListener("click", (event) => {
     const target = event.target.closest("[data-user-id]");
     if (!target) return;
@@ -1017,6 +1312,7 @@ socket.on("messageDeleted", async ({ id, mode }) => {
 
 (async function init() {
     try {
+        setupStaticIcons();
         if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
         await loadMe();
         await loadUsers();
