@@ -642,7 +642,6 @@ function createSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_nonce ON messages(sender_id, client_nonce) WHERE client_nonce IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id);
         CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id, read_at);
         CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id);
