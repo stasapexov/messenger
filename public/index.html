@@ -58,6 +58,7 @@
             try {
                 const response = await fetch(path, {
                     method: "POST",
+                    credentials: "same-origin",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body),
                 });
@@ -65,6 +66,12 @@
 
                 if (!response.ok || !data.success) {
                     authError.textContent = data.error || "Не удалось войти";
+                    return;
+                }
+
+                const session = await fetch("/me", { credentials: "same-origin" });
+                if (!session.ok) {
+                    authError.textContent = "Вход принят, но браузер не сохранил сессию. Обновите страницу и попробуйте еще раз.";
                     return;
                 }
 
@@ -84,7 +91,7 @@
             submitAuth("/register", forms.register);
         });
 
-        fetch("/me").then((response) => {
+        fetch("/me", { credentials: "same-origin" }).then((response) => {
             if (response.ok) window.location = "chat.html";
         });
     </script>

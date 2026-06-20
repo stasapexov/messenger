@@ -1027,6 +1027,7 @@ socket.on("messageDeleted", async ({ id, mode }) => {
         if (params.get("view") === "feed") switchView("viewFeed");
         if (params.get("chat")) selectChat(params.get("chat"));
     } catch (error) {
+        if (error.message === "Нужно войти") return;
         alert(error.message || "Не удалось загрузить приложение");
     }
 })();
