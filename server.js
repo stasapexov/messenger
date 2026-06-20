@@ -38,12 +38,17 @@ function parsePort(value, fallback) {
     return candidates.length ? candidates[candidates.length - 1] : fallback;
 }
 
+function readEnvFlag(name, fallback) {
+    if (process.env[name] === undefined) return fallback;
+    return ["1", "true", "yes", "on"].includes(String(process.env[name]).trim().toLowerCase());
+}
+
 const PORT = parsePort(process.env.PORT, 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 250);
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
-const COOKIE_SECURE = process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production";
+const COOKIE_SECURE = readEnvFlag("COOKIE_SECURE", process.env.NODE_ENV === "production");
 const WEB_PUSH_SUBJECT = process.env.WEB_PUSH_SUBJECT || "mailto:admin@example.com";
 
 function ensureWritableDir(dir) {
