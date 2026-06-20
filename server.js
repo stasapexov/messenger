@@ -15,6 +15,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: true, credentials: true },
 });
+const onlineUsers = new Map();
 
 function parsePort(value, fallback) {
     const text = String(value || "").trim();
@@ -313,6 +314,10 @@ function publicUser(user) {
         isAdmin: role === "admin",
         isSubadmin: role === "subadmin",
         canPublish: ["admin", "subadmin"].includes(role),
+        isBanned: Boolean(user.banned_at),
+        banReason: user.banned_reason || "",
+        isOnline: onlineUsers.has(user.id),
+        lastSeenAt: onlineUsers.has(user.id) ? null : user.last_seen_at || user.updated_at || user.created_at,
         avatar: user.avatar_file_id ? `/files/${user.avatar_file_id}` : null,
         createdAt: user.created_at,
     };
@@ -363,6 +368,13 @@ function isAdmin(user) {
 
 function canPublish(user) {
     return ["admin", "subadmin"].includes(userRole(user));
+}
+
+function ensureNotBanned(user) {
+    if (!user?.banned_at) return;
+    const error = new Error(user.banned_reason ? `Вы забанены: ${user.banned_reason}` : "Вы забанены");
+    error.status = 403;
+    throw error;
 }
 
 function requireAdmin(req, res, next) {
@@ -416,6 +428,9 @@ function createSchema() {
             avatar_file_id TEXT,
             role TEXT NOT NULL DEFAULT 'user',
             bio TEXT NOT NULL DEFAULT '',
+            banned_at TEXT,
+            banned_reason TEXT NOT NULL DEFAULT '',
+            last_seen_at TEXT,
             is_admin INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -492,6 +507,8 @@ function createSchema() {
             reply_to_message_id TEXT,
             body TEXT,
             kind TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'file', 'voice')),
+            style TEXT NOT NULL DEFAULT '',
+            client_nonce TEXT,
             deleted_for_all INTEGER NOT NULL DEFAULT 0,
             edited_at TEXT,
             created_at TEXT NOT NULL,
@@ -512,6 +529,15 @@ function createSchema() {
             message_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             deleted_at TEXT NOT NULL,
+            PRIMARY KEY (message_id, user_id),
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS message_reads (
+            message_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            read_at TEXT NOT NULL,
             PRIMARY KEY (message_id, user_id),
             FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -557,10 +583,12 @@ function createSchema() {
         CREATE TABLE IF NOT EXISTS news_comments (
             id TEXT PRIMARY KEY,
             news_id TEXT NOT NULL,
+            parent_id TEXT,
             user_id TEXT NOT NULL,
             text TEXT NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (news_id) REFERENCES news(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES news_comments(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
@@ -572,6 +600,18 @@ function createSchema() {
             created_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS profile_post_comments (
+            id TEXT PRIMARY KEY,
+            post_id TEXT NOT NULL,
+            parent_id TEXT,
+            user_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (post_id) REFERENCES profile_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES profile_post_comments(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS stickers (
@@ -602,9 +642,12 @@ function createSchema() {
 
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_nonce ON messages(sender_id, client_nonce) WHERE client_nonce IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id);
+        CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id, read_at);
         CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner_id);
         CREATE INDEX IF NOT EXISTS idx_profile_posts_user ON profile_posts(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_profile_post_comments_post ON profile_post_comments(post_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
     `);
@@ -619,14 +662,39 @@ function migrateSchema() {
     if (!userColumns.some((column) => column.name === "bio")) {
         run("ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
     }
+    if (!userColumns.some((column) => column.name === "banned_at")) {
+        run("ALTER TABLE users ADD COLUMN banned_at TEXT");
+    }
+    if (!userColumns.some((column) => column.name === "banned_reason")) {
+        run("ALTER TABLE users ADD COLUMN banned_reason TEXT NOT NULL DEFAULT ''");
+    }
+    if (!userColumns.some((column) => column.name === "last_seen_at")) {
+        run("ALTER TABLE users ADD COLUMN last_seen_at TEXT");
+    }
 
     const messageColumns = all("PRAGMA table_info(messages)");
     if (!messageColumns.some((column) => column.name === "reply_to_message_id")) {
         run("ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT");
     }
+    if (!messageColumns.some((column) => column.name === "style")) {
+        run("ALTER TABLE messages ADD COLUMN style TEXT NOT NULL DEFAULT ''");
+    }
+    if (!messageColumns.some((column) => column.name === "client_nonce")) {
+        run("ALTER TABLE messages ADD COLUMN client_nonce TEXT");
+    }
     run("CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id)");
+    run("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_nonce ON messages(sender_id, client_nonce) WHERE client_nonce IS NOT NULL");
 
     db.exec(`
+        CREATE TABLE IF NOT EXISTS message_reads (
+            message_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            read_at TEXT NOT NULL,
+            PRIMARY KEY (message_id, user_id),
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id, read_at);
         CREATE TABLE IF NOT EXISTS profile_posts (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
@@ -637,6 +705,18 @@ function migrateSchema() {
             FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_profile_posts_user ON profile_posts(user_id, created_at);
+        CREATE TABLE IF NOT EXISTS profile_post_comments (
+            id TEXT PRIMARY KEY,
+            post_id TEXT NOT NULL,
+            parent_id TEXT,
+            user_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (post_id) REFERENCES profile_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES profile_post_comments(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_post_comments_post ON profile_post_comments(post_id, created_at);
         CREATE TABLE IF NOT EXISTS stickers (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
@@ -648,6 +728,11 @@ function migrateSchema() {
         );
         CREATE INDEX IF NOT EXISTS idx_stickers_user ON stickers(user_id, created_at);
     `);
+
+    const newsCommentColumns = all("PRAGMA table_info(news_comments)");
+    if (!newsCommentColumns.some((column) => column.name === "parent_id")) {
+        run("ALTER TABLE news_comments ADD COLUMN parent_id TEXT");
+    }
 }
 
 function getSetting(key) {
@@ -763,6 +848,53 @@ function getChatMembers(chatId) {
     );
 }
 
+function unreadCount(chatId, userId) {
+    return get(
+        `SELECT COUNT(*) AS count
+         FROM messages
+         WHERE messages.chat_id = ?
+           AND messages.sender_id != ?
+           AND messages.deleted_for_all = 0
+           AND NOT EXISTS (
+               SELECT 1 FROM message_reads
+               WHERE message_reads.message_id = messages.id
+                 AND message_reads.user_id = ?
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM message_deletions
+               WHERE message_deletions.message_id = messages.id
+                 AND message_deletions.user_id = ?
+           )`,
+        [chatId, userId, userId, userId]
+    ).count;
+}
+
+function markChatRead(chatId, userId) {
+    requireChatMember(chatId, userId);
+    const stamp = now();
+    const messages = all(
+        `SELECT id FROM messages
+         WHERE chat_id = ?
+           AND sender_id != ?
+           AND deleted_for_all = 0
+           AND NOT EXISTS (
+               SELECT 1 FROM message_reads
+               WHERE message_reads.message_id = messages.id
+                 AND message_reads.user_id = ?
+           )`,
+        [chatId, userId, userId]
+    );
+
+    messages.forEach((message) => {
+        run(
+            "INSERT OR IGNORE INTO message_reads (message_id, user_id, read_at) VALUES (?, ?, ?)",
+            [message.id, userId, stamp]
+        );
+    });
+
+    return { readMessageIds: messages.map((message) => message.id), readAt: stamp };
+}
+
 function chatForUser(chat, currentUserId) {
     const members = getChatMembers(chat.id);
     const latest = get(
@@ -795,6 +927,7 @@ function chatForUser(chat, currentUserId) {
         avatar,
         role: members.find((member) => member.id === currentUserId)?.chat_role || null,
         members: members.map(publicUser),
+        unreadCount: unreadCount(chat.id, currentUserId),
         latestMessage: latest ? messageForClient(latest, currentUserId, { includeDeleted: true }) : null,
         createdAt: chat.created_at,
         updatedAt: chat.updated_at,
@@ -895,6 +1028,16 @@ function messageForClient(message, currentUserId, options = {}) {
     if (deletedForMe && !options.includeDeleted) return null;
 
     const chat = get("SELECT * FROM chats WHERE id = ?", [message.chat_id]);
+    const members = getChatMembers(message.chat_id);
+    const readRows = all(
+        `SELECT message_reads.*, users.name, users.tag
+         FROM message_reads
+         JOIN users ON users.id = message_reads.user_id
+         WHERE message_reads.message_id = ?
+           AND message_reads.user_id != ?
+         ORDER BY message_reads.read_at ASC`,
+        [message.id, message.sender_id]
+    );
     const canDeleteAll = Boolean(
         currentUserId === message.sender_id ||
             (chat?.type === "group" && canManageChat(message.chat_id, getUserById(currentUserId) || {}))
@@ -907,11 +1050,16 @@ function messageForClient(message, currentUserId, options = {}) {
         senderId: message.sender_id,
         text: message.deleted_for_all ? "" : message.body || "",
         kind: message.deleted_for_all ? "deleted" : message.kind,
+        style: message.deleted_for_all ? "" : message.style || "",
         attachment: message.deleted_for_all ? null : attachmentForMessage(message.id),
         replyTo: replyForMessage(message, currentUserId),
         deletedForAll: Boolean(message.deleted_for_all),
         canEdit: currentUserId === message.sender_id && !message.deleted_for_all,
         canDeleteAll,
+        readByCount: readRows.length,
+        recipientCount: Math.max(0, members.length - 1),
+        readBy: readRows.map((row) => ({ id: row.user_id, name: row.name, tag: row.tag, readAt: row.read_at })),
+        readByMe: Boolean(get("SELECT 1 FROM message_reads WHERE message_id = ? AND user_id = ?", [message.id, currentUserId])),
         editedAt: message.edited_at,
         createdAt: message.created_at,
     };
@@ -919,10 +1067,13 @@ function messageForClient(message, currentUserId, options = {}) {
 
 function insertMessage(user, chatId, payload, options = {}) {
     requireChatMember(chatId, user.id);
+    ensureNotBanned(user);
 
     const text = String(payload.text || "").trim().slice(0, 4000);
     const fileId = payload.fileId || null;
     const kind = payload.kind === "voice" ? "voice" : fileId ? "file" : "text";
+    const style = ["sticker", "circle"].includes(payload.style) ? payload.style : "";
+    const clientNonce = String(payload.clientNonce || "").slice(0, 120) || null;
     const replyToMessageId = payload.replyToMessageId || null;
 
     if (!text && !fileId) {
@@ -950,14 +1101,20 @@ function insertMessage(user, chatId, payload, options = {}) {
         }
     }
 
+    if (clientNonce) {
+        const existing = get("SELECT * FROM messages WHERE sender_id = ? AND client_nonce = ?", [user.id, clientNonce]);
+        if (existing) return messageForClient(existing, user.id);
+    }
+
     return tx(() => {
         const messageId = makeId("msg");
         const createdAt = now();
         run(
-            `INSERT INTO messages (id, chat_id, sender_id, reply_to_message_id, body, kind, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [messageId, chatId, user.id, replyToMessageId, text, kind, createdAt]
+            `INSERT INTO messages (id, chat_id, sender_id, reply_to_message_id, body, kind, style, client_nonce, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [messageId, chatId, user.id, replyToMessageId, text, kind, style, clientNonce, createdAt]
         );
+        run("INSERT OR IGNORE INTO message_reads (message_id, user_id, read_at) VALUES (?, ?, ?)", [messageId, user.id, createdAt]);
 
         if (fileId) {
             run("INSERT INTO message_attachments (message_id, file_id) VALUES (?, ?)", [messageId, fileId]);
@@ -1009,6 +1166,7 @@ function newsForClient(item, currentUserId) {
         [item.id]
     ).map((comment) => ({
         id: comment.id,
+        parentId: comment.parent_id || null,
         text: comment.text,
         createdAt: comment.created_at,
         user: publicUser({
@@ -1269,6 +1427,7 @@ app.post("/login", (req, res) => {
     }
 
     createSession(user, req, res);
+    run("UPDATE users SET last_seen_at = ? WHERE id = ?", [now(), user.id]);
     res.json({ success: true, user: publicUser(user) });
 });
 
@@ -1299,6 +1458,7 @@ app.get("/users", requireUser, (req, res) => {
 
 app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const name = String(req.body.name || "").trim().slice(0, 60);
         const bio = String(req.body.bio || "").trim().slice(0, 500);
         const updates = [];
@@ -1332,10 +1492,36 @@ app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
 
 function profilePostForClient(post) {
     const file = get("SELECT * FROM files WHERE id = ?", [post.image_file_id]);
+    const comments = all(
+        `SELECT profile_post_comments.*, users.name, users.tag, users.avatar_file_id, users.role, users.bio, users.is_admin, users.created_at AS user_created_at
+         FROM profile_post_comments
+         JOIN users ON users.id = profile_post_comments.user_id
+         WHERE profile_post_comments.post_id = ?
+         ORDER BY profile_post_comments.created_at ASC`,
+        [post.id]
+    ).map((comment) => ({
+        id: comment.id,
+        parentId: comment.parent_id || null,
+        text: comment.text,
+        createdAt: comment.created_at,
+        user: publicUser({
+            id: comment.user_id,
+            login: comment.user_id,
+            name: comment.name,
+            tag: comment.tag,
+            avatar_file_id: comment.avatar_file_id,
+            role: comment.role,
+            bio: comment.bio,
+            is_admin: comment.is_admin,
+            created_at: comment.user_created_at,
+        }),
+    }));
+
     return {
         id: post.id,
         caption: post.caption || "",
         image: publicFile(file),
+        comments,
         createdAt: post.created_at,
     };
 }
@@ -1358,6 +1544,7 @@ app.get("/profiles/:id", requireUser, (req, res) => {
 
 app.post("/profile/posts", requireUser, upload.single("image"), (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         if (!req.file) return res.status(400).json({ error: "Выберите фотографию" });
         if (!String(req.file.mimetype || "").startsWith("image/")) {
             return res.status(400).json({ error: "В профиль можно добавить только фото" });
@@ -1389,6 +1576,30 @@ app.delete("/profile/posts/:id", requireUser, (req, res) => {
     }
     run("DELETE FROM profile_posts WHERE id = ?", [post.id]);
     res.json({ success: true });
+});
+
+app.post("/profile/posts/:id/comments", requireUser, (req, res) => {
+    try {
+        ensureNotBanned(req.currentUser);
+        const post = get("SELECT * FROM profile_posts WHERE id = ?", [req.params.id]);
+        if (!post) return res.status(404).json({ error: "Фото не найдено" });
+
+        const text = String(req.body.text || "").trim().slice(0, 800);
+        const parentId = req.body.parentId || null;
+        if (!text) return res.status(400).json({ error: "Комментарий пустой" });
+        if (parentId) {
+            const parent = get("SELECT * FROM profile_post_comments WHERE id = ? AND post_id = ?", [parentId, post.id]);
+            if (!parent) return res.status(400).json({ error: "Нельзя ответить на этот комментарий" });
+        }
+
+        run(
+            "INSERT INTO profile_post_comments (id, post_id, parent_id, user_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [makeId("pcomment"), post.id, parentId, req.currentUser.id, text, now()]
+        );
+        res.status(201).json(profilePostForClient(get("SELECT * FROM profile_posts WHERE id = ?", [post.id])));
+    } catch (error) {
+        handleError(res, error);
+    }
 });
 
 app.get("/admin/invites", requirePublisher, (req, res) => {
@@ -1436,6 +1647,28 @@ app.patch("/admin/users/:id/role", requireAdmin, (req, res) => {
     res.json(publicUser(getUserById(user.id)));
 });
 
+app.post("/admin/users/:id/ban", requireAdmin, (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+    if (user.id === req.currentUser.id) return res.status(400).json({ error: "Нельзя забанить самого себя" });
+
+    const reason = String(req.body.reason || "").trim().slice(0, 400);
+    run(
+        "UPDATE users SET banned_at = ?, banned_reason = ?, updated_at = ? WHERE id = ?",
+        [now(), reason, now(), user.id]
+    );
+    io.to(`user_${user.id}`).emit("userBanned", { reason });
+    res.json(publicUser(getUserById(user.id)));
+});
+
+app.post("/admin/users/:id/unban", requireAdmin, (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+    run("UPDATE users SET banned_at = NULL, banned_reason = '', updated_at = ? WHERE id = ?", [now(), user.id]);
+    io.to(`user_${user.id}`).emit("userUnbanned");
+    res.json(publicUser(getUserById(user.id)));
+});
+
 app.post("/admin/users/:id/reset-password", requireAdmin, (req, res) => {
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: "Пользователь не найден" });
@@ -1450,6 +1683,7 @@ app.post("/admin/users/:id/reset-password", requireAdmin, (req, res) => {
 
 app.post("/files", requireUser, upload.single("file"), (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         if (!req.file) return res.status(400).json({ error: "Файл не выбран" });
         const file = fileFromUpload(req.file, req.currentUser.id);
         res.status(201).json(publicFile(file));
@@ -1520,6 +1754,11 @@ app.get("/stickers", requireUser, (req, res) => {
 });
 
 app.post("/stickers", requireUser, (req, res) => {
+    try {
+        ensureNotBanned(req.currentUser);
+    } catch (error) {
+        return handleError(res, error);
+    }
     const fileId = String(req.body.fileId || "");
     const file = get("SELECT * FROM files WHERE id = ?", [fileId]);
     if (!file || !canAccessFile(req.currentUser.id, file.id)) {
@@ -1545,6 +1784,7 @@ app.get("/chats", requireUser, (req, res) => {
 
 app.post("/chats/direct", requireUser, (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const chat = ensureDirectChat(req.currentUser.id, req.body.userId);
         res.status(201).json(chat);
     } catch (error) {
@@ -1554,6 +1794,7 @@ app.post("/chats/direct", requireUser, (req, res) => {
 
 app.post("/chats/group", requireUser, (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const title = String(req.body.title || "").trim().slice(0, 80);
         const requestedMemberIds = [...new Set(jsonList(req.body.memberIds).filter((id) => id !== req.currentUser.id))];
         const validMemberIds = requestedMemberIds.filter((id) => Boolean(getUserById(id)));
@@ -1644,6 +1885,7 @@ app.get("/chats/:id/messages", requireUser, (req, res) => {
 
 app.post("/chats/:id/messages", requireUser, (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const message = insertMessage(req.currentUser, req.params.id, req.body);
         io.to(`user_${req.currentUser.id}`).emit("newMessage", message);
         notifyChatMembers(req.params.id, req.currentUser.id, message);
@@ -1653,8 +1895,28 @@ app.post("/chats/:id/messages", requireUser, (req, res) => {
     }
 });
 
+app.post("/chats/:id/read", requireUser, (req, res) => {
+    try {
+        const result = markChatRead(req.params.id, req.currentUser.id);
+        if (result.readMessageIds.length) {
+            getChatMembers(req.params.id).forEach((member) =>
+                io.to(`user_${member.id}`).emit("chatRead", {
+                    chatId: req.params.id,
+                    readerId: req.currentUser.id,
+                    readMessageIds: result.readMessageIds,
+                    readAt: result.readAt,
+                })
+            );
+        }
+        res.json({ success: true, ...result });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
 app.patch("/messages/:id", requireUser, (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const message = get("SELECT * FROM messages WHERE id = ?", [req.params.id]);
         if (!message) return res.status(404).json({ error: "Сообщение не найдено" });
         if (message.sender_id !== req.currentUser.id) return res.status(403).json({ error: "Можно редактировать только свои сообщения" });
@@ -1733,6 +1995,7 @@ app.post("/messages/:id/forward", requireUser, (req, res) => {
                 text: source.body || "",
                 fileId: attachment?.file_id || null,
                 kind: source.kind === "voice" ? "voice" : attachment ? "file" : "text",
+                style: source.style || "",
             },
             { allowAccessibleFile: true }
         );
@@ -1755,6 +2018,7 @@ app.get("/news", requireUser, (req, res) => {
 
 app.post("/news", requirePublisher, upload.single("image"), (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const text = String(req.body.text || "").trim().slice(0, 4000);
         const visibility = req.body.visibility === "selected" ? "selected" : "all";
         const userIds = jsonList(req.body.userIds);
@@ -1791,6 +2055,7 @@ app.post("/news", requirePublisher, upload.single("image"), (req, res) => {
 
 app.put("/news/:id", requirePublisher, upload.single("image"), (req, res) => {
     try {
+        ensureNotBanned(req.currentUser);
         const item = get("SELECT * FROM news WHERE id = ?", [req.params.id]);
         if (!item) return res.status(404).json({ error: "Новость не найдена" });
         if (!isAdmin(req.currentUser) && item.author_id !== req.currentUser.id) {
@@ -1847,14 +2112,24 @@ app.post("/news/:id/like", requireUser, (req, res) => {
 });
 
 app.post("/news/:id/comments", requireUser, (req, res) => {
-    const text = String(req.body.text || "").trim().slice(0, 800);
-    if (!text) return res.status(400).json({ error: "Комментарий пустой" });
-    if (!newsCanSee(req.params.id, req.currentUser.id)) return res.status(404).json({ error: "Новость не найдена" });
-    run(
-        "INSERT INTO news_comments (id, news_id, user_id, text, created_at) VALUES (?, ?, ?, ?, ?)",
-        [makeId("comment"), req.params.id, req.currentUser.id, text, now()]
-    );
-    res.status(201).json(newsForClient(get("SELECT * FROM news WHERE id = ?", [req.params.id]), req.currentUser.id));
+    try {
+        ensureNotBanned(req.currentUser);
+        const text = String(req.body.text || "").trim().slice(0, 800);
+        const parentId = req.body.parentId || null;
+        if (!text) return res.status(400).json({ error: "Комментарий пустой" });
+        if (!newsCanSee(req.params.id, req.currentUser.id)) return res.status(404).json({ error: "Новость не найдена" });
+        if (parentId) {
+            const parent = get("SELECT * FROM news_comments WHERE id = ? AND news_id = ?", [parentId, req.params.id]);
+            if (!parent) return res.status(400).json({ error: "Нельзя ответить на этот комментарий" });
+        }
+        run(
+            "INSERT INTO news_comments (id, news_id, parent_id, user_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [makeId("comment"), req.params.id, parentId, req.currentUser.id, text, now()]
+        );
+        res.status(201).json(newsForClient(get("SELECT * FROM news WHERE id = ?", [req.params.id]), req.currentUser.id));
+    } catch (error) {
+        handleError(res, error);
+    }
 });
 
 io.use((socket, next) => {
@@ -1866,6 +2141,10 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
     socket.join(`user_${socket.user.id}`);
+    const count = onlineUsers.get(socket.user.id) || 0;
+    onlineUsers.set(socket.user.id, count + 1);
+    run("UPDATE users SET last_seen_at = ? WHERE id = ?", [now(), socket.user.id]);
+    io.emit("presenceChanged", { userId: socket.user.id, isOnline: true, lastSeenAt: null });
     listChats(socket.user.id).forEach((chat) => socket.join(`chat_${chat.id}`));
 
     socket.on("sendMessage", (data, ack) => {
@@ -1882,6 +2161,36 @@ io.on("connection", (socket) => {
 
     socket.on("joinChat", (chatId) => {
         if (memberRow(chatId, socket.user.id)) socket.join(`chat_${chatId}`);
+    });
+
+    socket.on("markRead", (chatId) => {
+        try {
+            const result = markChatRead(chatId, socket.user.id);
+            if (result.readMessageIds.length) {
+                getChatMembers(chatId).forEach((member) =>
+                    io.to(`user_${member.id}`).emit("chatRead", {
+                        chatId,
+                        readerId: socket.user.id,
+                        readMessageIds: result.readMessageIds,
+                        readAt: result.readAt,
+                    })
+                );
+            }
+        } catch {
+            // Ignore stale client read pings.
+        }
+    });
+
+    socket.on("disconnect", () => {
+        const current = onlineUsers.get(socket.user.id) || 0;
+        if (current <= 1) {
+            onlineUsers.delete(socket.user.id);
+            const stamp = now();
+            run("UPDATE users SET last_seen_at = ? WHERE id = ?", [stamp, socket.user.id]);
+            io.emit("presenceChanged", { userId: socket.user.id, isOnline: false, lastSeenAt: stamp });
+        } else {
+            onlineUsers.set(socket.user.id, current - 1);
+        }
     });
 });
 

@@ -54,7 +54,9 @@ button {
     cursor: pointer;
 }
 
-button svg {
+button svg,
+.icon-button svg,
+.send-button svg {
     width: 19px;
     height: 19px;
     fill: none;
@@ -148,6 +150,7 @@ textarea {
 .empty-state,
 .chat-row small,
 .person-main span,
+.person-main small,
 .header-user span,
 .chat-title span,
 .msg time,
@@ -315,11 +318,32 @@ textarea {
 .chat-row-main small,
 .person-main strong,
 .person-main span,
+.person-main small,
 .chat-title strong,
 .chat-title span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.chat-row-main small {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.presence-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--muted);
+    opacity: 0.45;
+}
+
+.presence-dot.online {
+    background: var(--success);
+    opacity: 1;
 }
 
 .app-main {
@@ -397,6 +421,10 @@ textarea {
 
 .clickable {
     cursor: pointer;
+}
+
+.profile-avatar:has(img) {
+    cursor: zoom-in;
 }
 
 .chat-layout {
@@ -530,6 +558,32 @@ textarea {
     transform: translateX(-50%);
 }
 
+.image-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 34;
+    display: grid;
+    place-items: center;
+    padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+}
+
+.image-viewer img {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.image-viewer .icon-button {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    right: 12px;
+    z-index: 35;
+    background: rgba(15, 23, 42, 0.72);
+    color: #fff;
+}
+
 .action-sheet-title {
     padding: 4px 4px 8px;
     color: var(--muted);
@@ -608,6 +662,19 @@ textarea {
     background: #edf4ff;
 }
 
+.unread-badge {
+    min-width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+}
+
 @media (hover: hover) {
     .chat-row:hover,
     .person-row:hover {
@@ -618,6 +685,19 @@ textarea {
 
 .person-row {
     background: var(--surface);
+}
+
+.person-row.is-banned {
+    outline: 1px solid rgba(220, 38, 38, 0.24);
+}
+
+.person-actions {
+    display: grid;
+    gap: 6px;
+}
+
+.ban-note {
+    color: var(--danger);
 }
 
 .person-row button {
@@ -642,7 +722,7 @@ textarea {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-rows: auto 1fr auto auto;
+    grid-template-rows: auto auto 1fr auto auto auto;
 }
 
 .chat-title {
@@ -705,6 +785,21 @@ textarea {
     background: #e5e7eb;
 }
 
+.msg-sticker,
+.msg-circle {
+    background: transparent !important;
+    box-shadow: none;
+    padding: 2px;
+}
+
+.msg-sticker .msg-meta,
+.msg-circle .msg-meta {
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.46);
+    color: #fff;
+}
+
 .msg-sender {
     font-size: 13px;
 }
@@ -713,11 +808,35 @@ textarea {
     opacity: 0.76;
 }
 
-.msg time {
+.msg-meta {
     justify-self: end;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.msg time {
     font-size: 10px;
     line-height: 1;
     opacity: 0.72;
+}
+
+.read-status {
+    width: 15px;
+    height: 12px;
+    display: inline-grid;
+    place-items: center;
+    opacity: 0.72;
+}
+
+.read-status svg {
+    width: 14px;
+    height: 14px;
+}
+
+.read-status.read {
+    color: #9be7ff;
+    opacity: 1;
 }
 
 .msg.me time {
@@ -819,6 +938,15 @@ textarea {
     text-decoration: none;
 }
 
+button.attachment {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
 .attachment img,
 .attachment video {
     width: 100%;
@@ -827,6 +955,25 @@ textarea {
     border-radius: 8px;
     object-fit: contain;
     background: #111827;
+}
+
+.attachment.image img {
+    display: block;
+    background: transparent;
+}
+
+.sticker-message {
+    width: min(190px, 54vw);
+    max-width: 100%;
+    justify-items: start;
+}
+
+.sticker-message img {
+    width: 100%;
+    max-height: 190px;
+    object-fit: contain;
+    border-radius: 0;
+    background: transparent;
 }
 
 .attachment audio {
@@ -838,6 +985,11 @@ textarea {
     grid-template-columns: 1fr 34px;
     gap: 8px;
     align-items: center;
+}
+
+.attachment-tools.only-cache {
+    grid-template-columns: 34px;
+    justify-content: end;
 }
 
 .cache-button {
@@ -860,6 +1012,33 @@ textarea {
 
 .media-attachment {
     width: min(320px, 100%);
+}
+
+.circle-attachment {
+    width: 184px;
+    position: relative;
+}
+
+.circle-player,
+.circle-video {
+    width: 184px;
+    height: 184px;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+.circle-video {
+    display: block;
+    object-fit: cover;
+    background: #111827;
+}
+
+.cache-button.mini {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    background: rgba(15, 23, 42, 0.62);
+    color: #fff;
 }
 
 .media-player {
@@ -952,9 +1131,16 @@ textarea {
 }
 
 .message-form {
-    grid-template-columns: 42px 42px 42px 1fr 42px;
+    grid-template-columns: 42px 42px minmax(0, 1fr) auto auto auto;
+    align-items: center;
     padding: 10px 12px;
     border-top: 1px solid var(--line);
+}
+
+.message-form .send-button.hidden,
+.message-form #voiceButton.hidden,
+.message-form #circleButton.hidden {
+    display: none;
 }
 
 .recording {
@@ -1029,6 +1215,7 @@ textarea {
     padding: 8px;
     border-radius: 8px;
     background: #f1f5f9;
+    margin-left: calc(var(--comment-depth, 0) * 14px);
 }
 
 .comment strong {
@@ -1037,6 +1224,16 @@ textarea {
 
 .comment span {
     font-size: 14px;
+}
+
+.comment-reply {
+    justify-self: start;
+    min-height: 26px;
+    padding: 0;
+    background: transparent;
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
 }
 
 .section-title {
@@ -1172,7 +1369,15 @@ textarea {
     background: var(--surface);
 }
 
-.profile-post img {
+.profile-post-image {
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.profile-post img,
+.profile-post-image img {
     width: 100%;
     height: auto;
     border-radius: 8px;

@@ -4,6 +4,7 @@ const state = {
     me: null,
     users: [],
     chats: [],
+    messages: [],
     selectedChat: null,
     selectedAttachment: null,
     replyToMessage: null,
@@ -11,6 +12,9 @@ const state = {
     forwardingMessage: null,
     profileUserId: null,
     stickers: [],
+    chatSearch: "",
+    messageSearch: "",
+    sending: false,
     editingNewsId: null,
     voiceStream: null,
     voiceContext: null,
@@ -29,6 +33,7 @@ const els = {
     logoutButton: document.getElementById("logoutButton"),
     chatLayout: document.querySelector(".chat-layout"),
     chatList: document.getElementById("chatList"),
+    chatSearch: document.getElementById("chatSearch"),
     refreshChatsButton: document.getElementById("refreshChatsButton"),
     openGroupPanelButton: document.getElementById("openGroupPanelButton"),
     closeGroupPanelButton: document.getElementById("closeGroupPanelButton"),
@@ -44,12 +49,15 @@ const els = {
     chatTitle: document.getElementById("chatTitle"),
     chatSubtitle: document.getElementById("chatSubtitle"),
     messages: document.getElementById("messages"),
+    messageSearch: document.getElementById("messageSearch"),
     replyPreview: document.getElementById("replyPreview"),
     replyPreviewText: document.getElementById("replyPreviewText"),
     clearReplyButton: document.getElementById("clearReplyButton"),
     messageForm: document.getElementById("messageForm"),
     messageText: document.getElementById("messageText"),
     messageFile: document.getElementById("messageFile"),
+    circleFile: document.getElementById("circleFile"),
+    circleButton: document.getElementById("circleButton"),
     stickerButton: document.getElementById("stickerButton"),
     attachmentPreview: document.getElementById("attachmentPreview"),
     attachmentName: document.getElementById("attachmentName"),
@@ -85,18 +93,25 @@ const els = {
     stickerPanel: document.getElementById("stickerPanel"),
     closeStickerButton: document.getElementById("closeStickerButton"),
     stickerList: document.getElementById("stickerList"),
+    imageViewerScrim: document.getElementById("imageViewerScrim"),
+    imageViewer: document.getElementById("imageViewer"),
+    imageViewerImg: document.getElementById("imageViewerImg"),
+    closeImageViewer: document.getElementById("closeImageViewer"),
 };
 
 function icon(name) {
     const icons = {
-        paperclip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.6l-8.2 8.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 0 1 5.7 5.7l-8.7 8.7a2 2 0 0 1-2.8-2.8l8-8"/></svg>',
+        paperclip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21.4 11.6-8.9 8.9a5.2 5.2 0 0 1-7.4-7.4l9.4-9.4a3.6 3.6 0 0 1 5.1 5.1l-9.4 9.4a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>',
         mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg>',
+        circleVideo: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m10 9 5 3-5 3Z"/></svg>',
         send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg>',
         sticker: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a4 4 0 0 1 4 4v7l-7 7H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Z"/><path d="M14 21v-4a3 3 0 0 1 3-3h4"/><path d="M8 9h.01M16 9h.01M8.5 14a5 5 0 0 0 7 0"/></svg>',
         moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 14.5A8.5 8.5 0 0 1 9.5 3a9 9 0 1 0 11.5 11.5Z"/></svg>',
         sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
         heart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg>',
         download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+        check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>',
+        doubleCheck: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 12 4 4L16 6"/><path d="m9 12 4 4 9-10"/></svg>',
     };
     return icons[name] || "";
 }
@@ -157,8 +172,74 @@ function fileSize(bytes) {
 }
 
 function messageSnippet(message, fallback = "Сообщение") {
-    const text = message?.text || message?.attachment?.originalName || "";
+    if (!message) return fallback;
+    if (message.text) return message.text.slice(0, 120);
+    if (message.style === "sticker") return "Стикер";
+    if (message.style === "circle") return "Кружок";
+    if (message.kind === "voice" || message.attachment?.type === "audio") return "Голосовое";
+    if (message.attachment?.type === "image") return "Фото";
+    if (message.attachment?.type === "video") return "Видео";
+    const text = message.attachment?.originalName || "";
     return text ? text.slice(0, 120) : fallback;
+}
+
+function generateClientNonce() {
+    return globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatPresence(user) {
+    if (!user) return "";
+    if (user.isOnline) return "в сети";
+    if (user.lastSeenAt) return `был(а) ${formatTime(user.lastSeenAt)}`;
+    return user.tag ? `@${user.tag}` : "";
+}
+
+function updateUserPresence(userId, patch) {
+    const update = (user) => (user?.id === userId ? Object.assign(user, patch) : user);
+    state.users = state.users.map(update);
+    state.chats.forEach((chat) => {
+        chat.members = chat.members?.map(update) || [];
+    });
+    if (state.me?.id === userId) Object.assign(state.me, patch);
+}
+
+function setComposerBusy(isBusy) {
+    state.sending = Boolean(isBusy);
+    els.messageForm.querySelectorAll("button, input").forEach((control) => {
+        if (control.id === "messageText") return;
+        control.disabled = state.sending;
+    });
+    updateComposerMode();
+}
+
+function updateComposerMode() {
+    if (!els.messageText) return;
+    const hasContent = Boolean(els.messageText.value.trim() || state.selectedAttachment);
+    const canRecord = !hasContent && !state.sending;
+    const sendButton = els.messageForm?.querySelector(".send-button");
+    sendButton?.classList.toggle("hidden", !hasContent);
+    els.voiceButton?.classList.toggle("hidden", !canRecord);
+    els.circleButton?.classList.toggle("hidden", !canRecord);
+}
+
+function messageMatchesSearch(message) {
+    const query = state.messageSearch.trim().toLowerCase();
+    if (!query) return true;
+    return [
+        message.text,
+        message.sender?.name,
+        message.sender?.tag,
+        message.attachment?.originalName,
+    ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+}
+
+function messageStatusHtml(message, isMe) {
+    if (!isMe || message.deletedForAll) return "";
+    const isRead = Number(message.readByCount || 0) > 0;
+    const label = isRead ? "Прочитано" : "Отправлено";
+    return `<span class="read-status ${isRead ? "read" : ""}" title="${label}">${icon(isRead ? "doubleCheck" : "check")}</span>`;
 }
 
 function canPublish() {
@@ -179,11 +260,13 @@ function applyTheme(theme = localStorage.getItem("messengerTheme") || "light") {
 function setupStaticIcons() {
     const fileLabel = document.querySelector('label[for="messageFile"]');
     if (fileLabel) fileLabel.innerHTML = icon("paperclip");
+    if (els.circleButton) els.circleButton.innerHTML = icon("circleVideo");
     if (els.voiceButton) els.voiceButton.innerHTML = icon("mic");
     if (els.stickerButton) els.stickerButton.innerHTML = icon("sticker");
     const sendButton = document.querySelector(".send-button");
     if (sendButton) sendButton.innerHTML = icon("send");
     applyTheme();
+    updateComposerMode();
 }
 
 function avatarContent(item) {
@@ -253,13 +336,25 @@ async function loadChats() {
 
 function renderChats() {
     els.chatList.innerHTML = "";
+    const query = state.chatSearch.trim().toLowerCase();
+    const visibleChats = state.chats.filter((chat) => {
+        if (!query) return true;
+        const other = chatProfileUser(chat);
+        return [chat.title, chat.subtitle, other?.name, other?.tag, chat.latestMessage?.text, chat.latestMessage?.attachment?.originalName]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query));
+    });
 
-    if (!state.chats.length) {
-        els.chatList.innerHTML = `<div class="empty-state">Пока нет чатов. Найдите человека или создайте группу.</div>`;
+    if (!visibleChats.length) {
+        els.chatList.innerHTML = `<div class="empty-state">${state.chats.length ? "Ничего не найдено" : "Пока нет чатов. Найдите человека или создайте группу."}</div>`;
         return;
     }
 
-    state.chats.forEach((chat) => {
+    visibleChats.forEach((chat) => {
+        const other = chatProfileUser(chat);
+        const presence = chat.type === "direct" ? formatPresence(other) : chat.subtitle;
+        const latest = messageSnippet(chat.latestMessage, presence || "");
+        const unread = Number(chat.unreadCount || 0);
         const row = document.createElement("button");
         row.type = "button";
         row.className = `chat-row ${state.selectedChat?.id === chat.id ? "active" : ""}`;
@@ -267,8 +362,9 @@ function renderChats() {
             <span class="avatar-button small">${avatarContent(chat)}</span>
             <span class="chat-row-main">
                 <strong>${escapeHtml(chat.title)}</strong>
-                <small>${escapeHtml(chat.latestMessage?.text || chat.latestMessage?.attachment?.originalName || chat.subtitle || "")}</small>
+                <small>${other ? `<span class="presence-dot ${other.isOnline ? "online" : ""}"></span>` : ""}${escapeHtml(latest)}</small>
             </span>
+            ${unread ? `<span class="unread-badge">${unread > 99 ? "99+" : unread}</span>` : ""}
         `;
         row.addEventListener("click", () => selectChat(chat.id));
         els.chatList.appendChild(row);
@@ -308,6 +404,8 @@ async function selectChat(chatId) {
     if (!chat) return;
 
     state.selectedChat = chat;
+    state.messageSearch = "";
+    if (els.messageSearch) els.messageSearch.value = "";
     clearReplyToMessage();
     setChatOpen(true);
     socket.emit("joinChat", chat.id);
@@ -319,16 +417,30 @@ async function selectChat(chatId) {
     els.chatAvatar.dataset.userId = profileUser?.id || "";
     els.chatAvatar.classList.toggle("clickable", Boolean(profileUser));
     els.chatTitle.textContent = chat.title;
-    els.chatSubtitle.textContent = chat.subtitle || "";
+    els.chatSubtitle.textContent = profileUser ? formatPresence(profileUser) : chat.subtitle || "";
     await loadMessages();
 }
 
 async function loadMessages() {
     if (!state.selectedChat) return;
-    const messages = await api(`/chats/${state.selectedChat.id}/messages`);
+    state.messages = await api(`/chats/${state.selectedChat.id}/messages`);
     els.messages.innerHTML = "";
-    messages.forEach((message) => addMessage(message));
+    state.messages.filter(messageMatchesSearch).forEach((message) => addMessage(message));
     scrollMessages();
+    await markSelectedChatRead();
+}
+
+async function markSelectedChatRead() {
+    if (!state.selectedChat) return;
+    try {
+        await api(`/chats/${state.selectedChat.id}/read`, { method: "POST", body: {} });
+        socket.emit("markRead", state.selectedChat.id);
+        const chat = state.chats.find((item) => item.id === state.selectedChat.id);
+        if (chat) chat.unreadCount = 0;
+        renderChats();
+    } catch {
+        // A stale chat selection should not interrupt reading the current screen.
+    }
 }
 
 function scrollMessages() {
@@ -336,9 +448,10 @@ function scrollMessages() {
 }
 
 function addMessage(message) {
+    if (!messageMatchesSearch(message)) return;
     const isMe = message.senderId === state.me.id;
     const item = document.createElement("article");
-    item.className = `msg ${isMe ? "me" : "him"}`;
+    item.className = `msg ${isMe ? "me" : "him"} ${message.style ? `msg-${message.style}` : ""}`;
     item.dataset.id = message.id;
     if (!message.deletedForAll) {
         item.tabIndex = 0;
@@ -355,13 +468,13 @@ function addMessage(message) {
         : `
             ${reply}
             ${message.text ? `<div class="msg-text">${escapeHtml(message.text)}</div>` : ""}
-            ${message.attachment ? attachmentHtml(message.attachment, message.kind) : ""}
+            ${message.attachment ? attachmentHtml(message.attachment, message.kind, message.style) : ""}
         `;
 
     item.innerHTML = `
         ${sender}
         ${body}
-        <time>${formatTime(message.createdAt)}${message.editedAt ? " · изм." : ""}</time>
+        <div class="msg-meta"><time>${formatTime(message.createdAt)}${message.editedAt ? " · изм." : ""}</time>${messageStatusHtml(message, isMe)}</div>
     `;
 
     item.querySelector(".reply-quote")?.addEventListener("click", (event) => {
@@ -576,15 +689,21 @@ function closeStickerPanel() {
 }
 
 async function sendSticker(fileId) {
-    if (!state.selectedChat || !fileId) return;
+    if (!state.selectedChat || !fileId || state.sending) return;
     const payload = {
         chatId: state.selectedChat.id,
         text: "",
         fileId,
         kind: "file",
+        style: "sticker",
+        clientNonce: generateClientNonce(),
         replyToMessageId: state.replyToMessage?.id || null,
     };
+    setComposerBusy(true);
+    const timer = window.setTimeout(() => setComposerBusy(false), 12000);
     socket.emit("sendMessage", payload, (response) => {
+        window.clearTimeout(timer);
+        setComposerBusy(false);
         if (!response?.success) alert(response?.error || "Не удалось отправить стикер");
     });
     clearReplyToMessage();
@@ -627,18 +746,43 @@ async function handleMessageAction(action) {
     }
 }
 
-function attachmentHtml(attachment, kind) {
+function attachmentHtml(attachment, kind, style = "") {
+    const fileUrl = escapeHtml(attachment.url);
+    const downloadUrl = `${fileUrl}?download=1`;
+
+    if (style === "sticker" && attachment.type === "image") {
+        return `<button class="attachment sticker-message" type="button" data-view-image="${fileUrl}" data-file-id="${escapeHtml(attachment.id)}"><img src="${fileUrl}" alt=""></button>`;
+    }
+
     if (attachment.type === "image") {
-        return `<a class="attachment image" href="${attachment.url}" target="_blank" rel="noreferrer" data-file-id="${escapeHtml(attachment.id)}"><img src="${attachment.url}" alt=""><span>${escapeHtml(attachment.originalName)}</span></a>`;
+        return `<button class="attachment image image-only" type="button" data-view-image="${fileUrl}" data-file-id="${escapeHtml(attachment.id)}"><img src="${fileUrl}" alt=""></button>`;
     }
+
     if (attachment.type === "video") {
-        return `<div class="attachment media-attachment"><div class="media-player video-player"><video src="${attachment.url}" controls preload="metadata" playsinline webkit-playsinline data-cache-url="${attachment.url}"></video></div><div class="attachment-tools"><a class="attachment-link" href="${attachment.url}?download=1">${escapeHtml(attachment.originalName)} - ${fileSize(attachment.size)}</a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+        if (style === "circle" || kind === "circle") {
+            return `<div class="attachment media-attachment circle-attachment"><div class="media-player circle-player"><video class="circle-video" src="${fileUrl}" controls preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video></div><button class="cache-button mini" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+        }
+        return `<div class="attachment media-attachment"><div class="media-player video-player"><video src="${fileUrl}" controls preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video></div><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
     }
+
     if (attachment.type === "audio" || kind === "voice") {
-        const title = kind === "voice" ? "Голосовое" : escapeHtml(attachment.originalName);
-        return `<div class="attachment media-attachment"><div class="media-player audio-player"><audio class="media-native" src="${attachment.url}" controls preload="metadata" playsinline data-cache-url="${attachment.url}"></audio></div><div class="attachment-tools"><a class="attachment-link" href="${attachment.url}?download=1">${title}${attachment.size ? ` - ${fileSize(attachment.size)}` : ""}</a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+        return `<div class="attachment media-attachment voice-attachment"><div class="media-player audio-player"><audio class="media-native" src="${fileUrl}" controls preload="metadata" playsinline data-cache-url="${fileUrl}"></audio></div><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
     }
-    return `<div class="attachment file"><a class="attachment-link" href="${attachment.url}?download=1"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${attachment.url}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+
+    return `<div class="attachment file"><a class="attachment-link" href="${downloadUrl}"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+}
+
+function openImageViewer(url) {
+    if (!url) return;
+    els.imageViewerImg.src = url;
+    els.imageViewerScrim.classList.remove("hidden");
+    els.imageViewer.classList.remove("hidden");
+}
+
+function closeImageViewer() {
+    els.imageViewerScrim.classList.add("hidden");
+    els.imageViewer.classList.add("hidden");
+    els.imageViewerImg.src = "";
 }
 
 function pauseOtherMedia(currentMedia) {
@@ -670,15 +814,6 @@ function setupMediaPlayers(root = document) {
     root.querySelectorAll(".media-player audio:not([data-ready]), .media-player video:not([data-ready])").forEach((media) => {
         media.dataset.ready = "1";
         media.addEventListener("play", () => pauseOtherMedia(media));
-        cachedBlobUrl(media.dataset.cacheUrl)
-            .then((localUrl) => {
-                if (localUrl && !media.dataset.localReady && media.paused) {
-                    media.dataset.localReady = "1";
-                    media.src = localUrl;
-                    media.load();
-                }
-            })
-            .catch(() => {});
     });
     root.querySelectorAll(".cache-button:not([data-ready])").forEach((button) => {
         button.dataset.ready = "1";
@@ -706,36 +841,53 @@ async function uploadSelectedAttachment() {
 function setAttachment(file, kind = "file") {
     state.selectedAttachment = file ? { file, kind } : null;
     els.attachmentPreview.classList.toggle("hidden", !file);
-    els.attachmentName.textContent = file ? `${kind === "voice" ? "Голосовое" : file.name} · ${fileSize(file.size)}` : "";
+    const titles = { voice: "Голосовое готово", circle: "Кружок готов", file: file?.type?.startsWith("image/") ? "Фото выбрано" : file?.name };
+    els.attachmentName.textContent = file ? `${titles[kind] || file.name} · ${fileSize(file.size)}` : "";
+    updateComposerMode();
 }
 
 async function sendMessage(event) {
     event.preventDefault();
-    if (!state.selectedChat) return;
+    if (!state.selectedChat || state.sending) return;
 
     const text = els.messageText.value.trim();
     if (!text && !state.selectedAttachment) return;
 
     try {
+        setComposerBusy(true);
+        const attachmentKind = state.selectedAttachment?.kind || null;
         const uploaded = await uploadSelectedAttachment();
         const payload = {
             chatId: state.selectedChat.id,
             text,
             fileId: uploaded?.id || null,
-            kind: state.selectedAttachment?.kind || (uploaded ? "file" : "text"),
+            kind: attachmentKind === "voice" ? "voice" : uploaded ? "file" : "text",
+            style: attachmentKind === "circle" ? "circle" : "",
+            clientNonce: generateClientNonce(),
             replyToMessageId: state.replyToMessage?.id || null,
         };
 
-        socket.emit("sendMessage", payload, (response) => {
-            if (!response?.success) alert(response?.error || "Не удалось отправить сообщение");
+        await new Promise((resolve, reject) => {
+            const timer = window.setTimeout(() => reject(new Error("Сервер долго не отвечает. Сообщение не отправлено повторно, попробуйте позже.")), 15000);
+            socket.emit("sendMessage", payload, (response) => {
+                window.clearTimeout(timer);
+                if (!response?.success) {
+                    reject(new Error(response?.error || "Не удалось отправить сообщение"));
+                    return;
+                }
+                resolve(response.message);
+            });
         });
 
         els.messageText.value = "";
         els.messageFile.value = "";
+        els.circleFile.value = "";
         setAttachment(null);
         clearReplyToMessage();
     } catch (error) {
         alert(error.message);
+    } finally {
+        setComposerBusy(false);
     }
 }
 
@@ -798,7 +950,7 @@ function renderPeople() {
 
 function userCard(user, adminMode = false) {
     const row = document.createElement("div");
-    row.className = "person-row";
+    row.className = `person-row ${user.isBanned ? "is-banned" : ""}`;
     const roleControl = adminMode && state.me?.isAdmin
         ? `<select class="role-select" data-role>
                 <option value="user" ${user.role === "user" ? "selected" : ""}>Пользователь</option>
@@ -806,14 +958,24 @@ function userCard(user, adminMode = false) {
                 <option value="admin" ${user.role === "admin" ? "selected" : ""}>Админ</option>
            </select>`
         : `<small>${roleLabel(user.role)}</small>`;
+    const status = user.isBanned
+        ? `<small class="ban-note">Бан: ${escapeHtml(user.banReason || "без причины")}</small>`
+        : `<small>${formatPresence(user)}</small>`;
+    const actions = adminMode
+        ? `<div class="person-actions">
+                <button type="button" data-user-action="reset">Сброс</button>
+                <button type="button" data-user-action="${user.isBanned ? "unban" : "ban"}">${user.isBanned ? "Разбан" : "Бан"}</button>
+           </div>`
+        : `<button type="button" data-user-action="message">Написать</button>`;
     row.innerHTML = `
         <button class="avatar-button small profile-link" type="button" data-profile="${escapeHtml(user.id)}">${avatarContent(user)}</button>
         <div class="person-main">
             <strong>${escapeHtml(user.name)}</strong>
             <span>@${escapeHtml(user.tag)} · ${roleLabel(user.role)}</span>
+            ${status}
             ${adminMode ? roleControl : ""}
         </div>
-        <button type="button" data-user-action>${adminMode ? "Сброс" : "Написать"}</button>
+        ${actions}
     `;
     row.querySelector("[data-profile]").addEventListener("click", () => openUserProfile(user.id));
     row.querySelector("[data-role]")?.addEventListener("change", async (event) => {
@@ -825,13 +987,28 @@ function userCard(user, adminMode = false) {
         await loadUsers();
         await loadAdmin();
     });
-    row.querySelector("[data-user-action]").addEventListener("click", async () => {
+    row.addEventListener("click", async (event) => {
+        const actionButton = event.target.closest("[data-user-action]");
+        if (!actionButton) return;
+        const action = actionButton.dataset.userAction;
         if (adminMode) {
             if (!state.me?.isAdmin) return;
-            const password = prompt("Новый пароль. Оставьте пустым, чтобы сервер сгенерировал временный пароль", "");
-            const body = password ? { password } : {};
-            const result = await api(`/admin/users/${user.id}/reset-password`, { method: "POST", body });
-            alert(`Временный пароль: ${result.temporaryPassword}`);
+            if (action === "reset") {
+                const password = prompt("Новый пароль. Оставьте пустым, чтобы сервер сгенерировал временный пароль", "");
+                const body = password ? { password } : {};
+                const result = await api(`/admin/users/${user.id}/reset-password`, { method: "POST", body });
+                alert(`Временный пароль: ${result.temporaryPassword}`);
+            }
+            if (action === "ban") {
+                const reason = prompt("Причина бана", user.banReason || "");
+                if (reason === null) return;
+                await api(`/admin/users/${user.id}/ban`, { method: "POST", body: { reason } });
+            }
+            if (action === "unban") {
+                await api(`/admin/users/${user.id}/unban`, { method: "POST", body: {} });
+            }
+            await loadUsers();
+            await loadAdmin();
             return;
         }
 
@@ -855,6 +1032,41 @@ function renderNewsAudience(selected = { userIds: [], chatIds: [] }) {
         state.chats.filter((chat) => chat.type === "group"),
         selected.chatIds || []
     );
+}
+
+function commentsHtml(comments = []) {
+    const byParent = new Map();
+    comments.forEach((comment) => {
+        const parent = comment.parentId || "root";
+        if (!byParent.has(parent)) byParent.set(parent, []);
+        byParent.get(parent).push(comment);
+    });
+
+    function renderBranch(parentId, depth = 0) {
+        return (byParent.get(parentId) || [])
+            .map((comment) => `
+                <div class="comment" data-comment-id="${escapeHtml(comment.id)}" style="--comment-depth:${Math.min(depth, 4)}">
+                    <strong>${escapeHtml(comment.user?.name || "Пользователь")}</strong>
+                    <span>${escapeHtml(comment.text)}</span>
+                    <button class="comment-reply" type="button" data-reply-comment="${escapeHtml(comment.id)}" data-reply-name="${escapeHtml(comment.user?.name || "Пользователь")}">Ответить</button>
+                </div>
+                ${renderBranch(comment.id, depth + 1)}
+            `)
+            .join("");
+    }
+
+    return renderBranch("root");
+}
+
+function bindCommentReplies(root, form) {
+    root.querySelectorAll("[data-reply-comment]").forEach((button) => {
+        button.addEventListener("click", () => {
+            form.dataset.parentId = button.dataset.replyComment;
+            const input = form.querySelector("input");
+            input.placeholder = `Ответ ${button.dataset.replyName || ""}`.trim();
+            input.focus();
+        });
+    });
 }
 
 function renderNews(news) {
@@ -888,12 +1100,9 @@ function renderNews(news) {
         `;
 
         const comments = card.querySelector(".comments");
-        item.comments.forEach((comment) => {
-            const row = document.createElement("div");
-            row.className = "comment";
-            row.innerHTML = `<strong>${escapeHtml(comment.user?.name || "Пользователь")}</strong><span>${escapeHtml(comment.text)}</span>`;
-            comments.appendChild(row);
-        });
+        comments.innerHTML = commentsHtml(item.comments);
+        const commentForm = card.querySelector(".comment-form");
+        bindCommentReplies(comments, commentForm);
 
         card.querySelector('[data-action="like"]').addEventListener("click", async () => {
             await api(`/news/${item.id}/like`, { method: "POST", body: {} });
@@ -905,11 +1114,13 @@ function renderNews(news) {
             await api(`/news/${item.id}`, { method: "DELETE" });
             await loadNews();
         });
-        card.querySelector(".comment-form").addEventListener("submit", async (event) => {
+        commentForm.addEventListener("submit", async (event) => {
             event.preventDefault();
             const input = event.currentTarget.querySelector("input");
-            await api(`/news/${item.id}/comments`, { method: "POST", body: { text: input.value } });
+            await api(`/news/${item.id}/comments`, { method: "POST", body: { text: input.value, parentId: event.currentTarget.dataset.parentId || null } });
             input.value = "";
+            delete event.currentTarget.dataset.parentId;
+            input.placeholder = "Комментарий";
             await loadNews();
         });
 
@@ -993,8 +1204,13 @@ function profilePostsHtml(profile, canManage) {
     return profile.posts
         .map((post) => `
             <article class="profile-post" data-post-id="${escapeHtml(post.id)}">
-                <img src="${post.image.url}" alt="">
+                <button class="profile-post-image" type="button" data-view-image="${escapeHtml(post.image.url)}"><img src="${escapeHtml(post.image.url)}" alt=""></button>
                 ${post.caption ? `<p>${escapeHtml(post.caption)}</p>` : ""}
+                <div class="comments">${commentsHtml(post.comments || [])}</div>
+                <form class="comment-form profile-comment-form">
+                    <input type="text" placeholder="Комментарий" required>
+                    <button type="submit">↑</button>
+                </form>
                 ${canManage ? '<button class="ghost-button" type="button" data-delete-post>Удалить</button>' : ""}
             </article>
         `)
@@ -1038,6 +1254,8 @@ function renderProfile(profile = { user: state.me, posts: [] }) {
     document.getElementById("profileForm")?.addEventListener("submit", saveProfile);
     document.getElementById("profilePostForm")?.addEventListener("submit", uploadProfilePost);
     document.getElementById("enablePushButton")?.addEventListener("click", enablePush);
+    const avatarImage = els.profilePanel.querySelector(".profile-avatar img");
+    if (avatarImage) avatarImage.parentElement.addEventListener("click", () => openImageViewer(avatarImage.src));
     document.getElementById("messageProfileButton")?.addEventListener("click", async () => {
         const chat = await api("/chats/direct", { method: "POST", body: { userId: user.id } });
         await loadChats();
@@ -1049,6 +1267,27 @@ function renderProfile(profile = { user: state.me, posts: [] }) {
             const post = button.closest("[data-post-id]");
             if (!post || !confirm("Удалить фото из профиля?")) return;
             await api(`/profile/posts/${post.dataset.postId}`, { method: "DELETE" });
+            await loadProfile(user.id);
+        });
+    });
+    els.profilePanel.querySelectorAll(".profile-post").forEach((post) => {
+        const comments = post.querySelector(".comments");
+        const form = post.querySelector(".profile-comment-form");
+        if (comments && form) bindCommentReplies(comments, form);
+        post.querySelector("[data-view-image]")?.addEventListener("click", (event) => {
+            event.preventDefault();
+            openImageViewer(event.currentTarget.dataset.viewImage);
+        });
+        form?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const input = event.currentTarget.querySelector("input");
+            await api(`/profile/posts/${post.dataset.postId}/comments`, {
+                method: "POST",
+                body: { text: input.value, parentId: event.currentTarget.dataset.parentId || null },
+            });
+            input.value = "";
+            delete event.currentTarget.dataset.parentId;
+            input.placeholder = "Комментарий";
             await loadProfile(user.id);
         });
     });
@@ -1250,6 +1489,8 @@ els.forwardTargets.addEventListener("click", (event) => {
 });
 els.closeChatButton.addEventListener("click", () => {
     state.selectedChat = null;
+    state.messages = [];
+    state.messageSearch = "";
     clearReplyToMessage();
     setChatOpen(false);
     els.chatRoom.classList.add("hidden");
@@ -1257,12 +1498,46 @@ els.closeChatButton.addEventListener("click", () => {
     renderChats();
 });
 els.messageForm.addEventListener("submit", sendMessage);
-els.messageFile.addEventListener("change", () => setAttachment(els.messageFile.files[0] || null, "file"));
+els.messageText.addEventListener("input", updateComposerMode);
+els.chatSearch.addEventListener("input", () => {
+    state.chatSearch = els.chatSearch.value;
+    renderChats();
+});
+els.messageSearch.addEventListener("input", () => {
+    state.messageSearch = els.messageSearch.value;
+    els.messages.innerHTML = "";
+    state.messages.filter(messageMatchesSearch).forEach((message) => addMessage(message));
+});
+els.messageFile.addEventListener("change", () => {
+    els.circleFile.value = "";
+    setAttachment(els.messageFile.files[0] || null, "file");
+});
+els.circleButton.addEventListener("click", () => els.circleFile.click());
+els.circleFile.addEventListener("change", () => {
+    els.messageFile.value = "";
+    const file = els.circleFile.files[0] || null;
+    if (file?.type && !file.type.startsWith("video/")) {
+        alert("Для кружка выберите видео");
+        els.circleFile.value = "";
+        return;
+    }
+    setAttachment(file, "circle");
+});
 els.clearAttachment.addEventListener("click", () => {
     els.messageFile.value = "";
+    els.circleFile.value = "";
     setAttachment(null);
 });
 els.voiceButton.addEventListener("click", () => startVoiceRecording().catch((error) => alert(error.message)));
+els.messages.addEventListener("click", (event) => {
+    const image = event.target.closest("[data-view-image]");
+    if (!image) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openImageViewer(image.dataset.viewImage);
+});
+els.imageViewerScrim.addEventListener("click", closeImageViewer);
+els.closeImageViewer.addEventListener("click", closeImageViewer);
 els.peopleSearchButton.addEventListener("click", async () => {
     await loadUsers(els.peopleSearch.value);
     renderPeople();
@@ -1282,6 +1557,7 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !els.groupForm.classList.contains("hidden")) closeGroupForm();
     if (event.key === "Escape" && !els.messageActionSheet.classList.contains("hidden")) closeMessageActions();
     if (event.key === "Escape" && !els.forwardPanel.classList.contains("hidden")) closeForwardPanel();
+    if (event.key === "Escape" && !els.imageViewer.classList.contains("hidden")) closeImageViewer();
 });
 
 socket.on("connect_error", () => {
@@ -1290,8 +1566,10 @@ socket.on("connect_error", () => {
 
 socket.on("newMessage", async (message) => {
     if (state.selectedChat?.id === message.chatId) {
+        if (!state.messages.some((item) => item.id === message.id)) state.messages.push(message);
         addMessage(message);
         scrollMessages();
+        await markSelectedChatRead();
     }
     await loadChats();
 });
@@ -1308,6 +1586,44 @@ socket.on("messageDeleted", async ({ id, mode }) => {
     if (mode === "all") {
         await loadMessages();
     }
+});
+
+socket.on("chatRead", async ({ chatId, readerId, readMessageIds }) => {
+    if (state.selectedChat?.id === chatId) {
+        const ids = new Set(readMessageIds || []);
+        state.messages.forEach((message) => {
+            if (ids.has(message.id) && message.senderId === state.me?.id && readerId !== state.me?.id) {
+                message.readByCount = Math.max(Number(message.readByCount || 0), 1);
+            }
+        });
+        els.messages.innerHTML = "";
+        state.messages.filter(messageMatchesSearch).forEach((message) => addMessage(message));
+        scrollMessages();
+    }
+    await loadChats();
+});
+
+socket.on("presenceChanged", ({ userId, isOnline, lastSeenAt }) => {
+    updateUserPresence(userId, { isOnline, lastSeenAt });
+    renderChats();
+    if (state.selectedChat?.type === "direct") {
+        const profileUser = chatProfileUser(state.selectedChat);
+        els.chatSubtitle.textContent = formatPresence(profileUser);
+    }
+    if (document.getElementById("viewPeople").classList.contains("active")) renderPeople();
+    if (document.getElementById("viewAdmin").classList.contains("active")) loadAdmin().catch(() => {});
+});
+
+socket.on("userBanned", ({ reason }) => {
+    if (state.me) Object.assign(state.me, { isBanned: true, banReason: reason || "" });
+    renderHeader();
+    alert(`Вы заблокированы${reason ? `: ${reason}` : ""}. Читать можно, писать нельзя.`);
+});
+
+socket.on("userUnbanned", () => {
+    if (state.me) Object.assign(state.me, { isBanned: false, banReason: "" });
+    renderHeader();
+    alert("Бан снят");
 });
 
 (async function init() {
