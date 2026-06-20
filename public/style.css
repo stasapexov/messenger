@@ -306,6 +306,18 @@ textarea {
     flex-direction: column;
 }
 
+#viewFeed {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+#viewFeed .feed-list {
+    flex: none;
+    min-height: auto;
+    overflow: visible;
+}
+
 .bottom-nav {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
