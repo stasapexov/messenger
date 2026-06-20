@@ -990,7 +990,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 socket.on("connect_error", () => {
-    window.location = "index.html";
+    console.warn("Socket connection failed; keeping the current session open.");
 });
 
 socket.on("newMessage", async (message) => {
