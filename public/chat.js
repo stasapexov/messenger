@@ -19,6 +19,8 @@ const state = {
     mediaItems: [],
     mediaIndex: 0,
     mediaSwipe: null,
+    chatWallpapers: new Map(),
+    groupProfile: null,
     wallpaperLongPress: null,
     wallpaperPointer: null,
     voiceStream: null,
@@ -98,6 +100,19 @@ const els = {
     stickerPanel: document.getElementById("stickerPanel"),
     closeStickerButton: document.getElementById("closeStickerButton"),
     stickerList: document.getElementById("stickerList"),
+    stickerImage: document.getElementById("stickerImage"),
+    groupProfileScrim: document.getElementById("groupProfileScrim"),
+    groupProfilePanel: document.getElementById("groupProfilePanel"),
+    closeGroupProfileButton: document.getElementById("closeGroupProfileButton"),
+    groupProfileTitle: document.getElementById("groupProfileTitle"),
+    groupProfileSubtitle: document.getElementById("groupProfileSubtitle"),
+    groupProfileForm: document.getElementById("groupProfileForm"),
+    groupProfileName: document.getElementById("groupProfileName"),
+    openAddGroupMembersButton: document.getElementById("openAddGroupMembersButton"),
+    toggleGroupMembersButton: document.getElementById("toggleGroupMembersButton"),
+    groupProfileAddMembers: document.getElementById("groupProfileAddMembers"),
+    groupProfileMembers: document.getElementById("groupProfileMembers"),
+    groupProfileMedia: document.getElementById("groupProfileMedia"),
     wallpaperScrim: document.getElementById("wallpaperScrim"),
     wallpaperPanel: document.getElementById("wallpaperPanel"),
     closeWallpaperButton: document.getElementById("closeWallpaperButton"),
@@ -628,7 +643,8 @@ async function selectChat(chatId) {
     els.chatAvatar.innerHTML = avatarContent(chat);
     const profileUser = chatProfileUser(chat);
     els.chatAvatar.dataset.userId = profileUser?.id || "";
-    els.chatAvatar.classList.toggle("clickable", Boolean(profileUser));
+    els.chatAvatar.dataset.chatId = chat.type === "group" ? chat.id : "";
+    els.chatAvatar.classList.toggle("clickable", Boolean(profileUser) || chat.type === "group");
     els.chatTitle.textContent = chat.title;
     els.chatSubtitle.textContent = profileUser ? formatPresence(profileUser) : chat.subtitle || "";
     await loadMessages();
@@ -636,7 +652,7 @@ async function selectChat(chatId) {
 
 async function loadMessages() {
     if (!state.selectedChat) return;
-    applyChatWallpaper();
+    await loadChatWallpaper(state.selectedChat.id).catch(() => applyChatWallpaper());
     state.messages = await api(`/chats/${state.selectedChat.id}/messages`);
     els.messages.innerHTML = "";
     state.messages.filter(messageMatchesSearch).forEach((message) => addMessage(message));
@@ -935,6 +951,23 @@ function renderStickers() {
     });
 }
 
+function renderStickers() {
+    els.stickerList.innerHTML = "";
+    if (!state.stickers.length) {
+        els.stickerList.innerHTML = `<div class="empty-state compact">Выберите картинку из галереи выше и сделайте первый стикер</div>`;
+        return;
+    }
+
+    state.stickers.forEach((sticker) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sticker-item";
+        button.dataset.fileId = sticker.file.id;
+        button.innerHTML = `<img src="${sticker.file.url}" alt="">`;
+        els.stickerList.appendChild(button);
+    });
+}
+
 async function openStickerPanel() {
     if (!state.selectedChat) return;
     await loadStickers();
@@ -1059,6 +1092,33 @@ function attachmentHtml(attachment, kind, style = "") {
     return `<div class="attachment file"><a class="attachment-link" href="${downloadUrl}"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
 }
 
+function attachmentHtml(attachment, kind, style = "") {
+    const fileUrl = escapeHtml(attachment.url);
+    const downloadUrl = `${fileUrl}?download=1`;
+    const fileId = escapeHtml(attachment.id);
+
+    if (style === "sticker" && attachment.type === "image") {
+        return `<button class="attachment sticker-message" type="button" data-view-media="${fileUrl}" data-view-image="${fileUrl}" data-file-id="${fileId}"><img src="${fileUrl}" alt=""></button>`;
+    }
+
+    if (attachment.type === "image") {
+        return `<button class="attachment image image-only" type="button" data-view-media="${fileUrl}" data-view-image="${fileUrl}" data-file-id="${fileId}"><img src="${fileUrl}" alt=""></button>`;
+    }
+
+    if (attachment.type === "video") {
+        if (style === "circle" || kind === "circle") {
+            return `<div class="attachment media-attachment circle-attachment"><button class="circle-open" type="button" data-view-media="${fileUrl}" aria-label="Открыть кружок"><video class="circle-video" src="${fileUrl}" autoplay loop muted preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video></button><button class="cache-button mini" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+        }
+        return `<div class="attachment media-attachment"><button class="media-open" type="button" data-view-media="${fileUrl}"><video src="${fileUrl}" muted preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video><span>Открыть видео</span></button><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+    }
+
+    if (attachment.type === "audio" || kind === "voice") {
+        return `<div class="attachment media-attachment voice-attachment"><button class="media-open audio-open" type="button" data-view-media="${fileUrl}">Открыть аудио</button><div class="media-player audio-player"><audio class="media-native" src="${fileUrl}" controls preload="metadata" playsinline data-cache-url="${fileUrl}"></audio></div><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+    }
+
+    return `<div class="attachment file"><a class="attachment-link" href="${downloadUrl}"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+}
+
 function openImageViewer(url) {
     if (!url) return;
     openMediaViewer(url);
@@ -1067,6 +1127,7 @@ function openImageViewer(url) {
 function closeImageViewer() {
     els.imageViewerScrim.classList.add("hidden");
     els.imageViewer.classList.add("hidden");
+    els.imageViewer.classList.remove("circle-mode");
     els.imageViewerImg.src = "";
     state.mediaSwipe = null;
     state.mediaItems = [];
@@ -1089,6 +1150,7 @@ function mediaItemsFromMessages() {
             id: message.attachment.id,
             url: message.attachment.url,
             type: message.attachment.type,
+            style: message.style || "",
             name: message.attachment.originalName || messageSnippet(message),
             downloadUrl: `${message.attachment.url}?download=1`,
         }));
@@ -1097,6 +1159,7 @@ function mediaItemsFromMessages() {
 function renderMediaViewer() {
     const item = state.mediaItems[state.mediaIndex];
     if (!item) return;
+    els.imageViewer.classList.toggle("circle-mode", item.style === "circle");
 
     [els.imageViewerImg, els.mediaViewerVideo, els.mediaViewerAudio].forEach((node) => {
         if (!node) return;
@@ -1838,6 +1901,238 @@ async function startVoiceRecording() {
     els.voiceButton.classList.add("recording");
 }
 
+function readWallpaper(chatId = state.selectedChat?.id) {
+    if (!chatId) return {};
+    return state.chatWallpapers.get(chatId) || {};
+}
+
+async function loadChatWallpaper(chatId = state.selectedChat?.id) {
+    if (!chatId) return {};
+    const wallpaper = await api(`/chats/${encodeURIComponent(chatId)}/wallpaper`);
+    state.chatWallpapers.set(chatId, wallpaper || {});
+    if (state.selectedChat?.id === chatId) applyChatWallpaper();
+    return wallpaper;
+}
+
+function applyChatWallpaper() {
+    if (!els.messages) return;
+    const wallpaper = readWallpaper();
+    const color = wallpaper.color || "";
+    const imageUrl = wallpaper.image?.url || "";
+    const stickers = Array.isArray(wallpaper.stickers) ? wallpaper.stickers.slice(0, 40) : [];
+    const stickerImages = stickers.map((sticker) => `url("${String(sticker.url || sticker).replaceAll('"', "%22")}")`);
+    const stickerPositions = stickers.map((_, index) => `${8 + ((index * 19) % 86)}% ${8 + ((index * 29) % 82)}%`);
+    const gradientLayer = color.startsWith("linear-gradient") ? color : "";
+    const imageLayer = imageUrl ? `url("${imageUrl.replaceAll('"', "%22")}")` : "";
+
+    els.messages.classList.toggle("has-wallpaper", Boolean(color || imageUrl || stickerImages.length));
+    els.messages.style.backgroundColor = color && !gradientLayer ? color : "";
+    els.messages.style.backgroundImage = [...stickerImages, imageLayer, gradientLayer].filter(Boolean).join(", ");
+    els.messages.style.backgroundSize = [...stickerImages.map(() => "72px 72px"), imageLayer ? "cover" : "", gradientLayer ? "cover" : ""]
+        .filter(Boolean)
+        .join(", ");
+    els.messages.style.backgroundPosition = [...stickerPositions, imageLayer ? "center" : "", gradientLayer ? "center" : ""]
+        .filter(Boolean)
+        .join(", ");
+    els.messages.style.backgroundRepeat = [...stickerImages.map(() => "no-repeat"), imageLayer ? "no-repeat" : "", gradientLayer ? "no-repeat" : ""]
+        .filter(Boolean)
+        .join(", ");
+}
+
+async function saveWallpaper(nextWallpaper = {}, options = {}) {
+    if (!state.selectedChat) return;
+    const formData = new FormData();
+    formData.append("color", nextWallpaper.color || "");
+    formData.append(
+        "stickerFileIds",
+        JSON.stringify((nextWallpaper.stickers || []).map((item) => item.id || item.fileId || item).filter(Boolean))
+    );
+    if (options.clearImage) formData.append("clearImage", "1");
+    if (options.imageFile) formData.append("image", options.imageFile);
+    const wallpaper = await api(`/chats/${state.selectedChat.id}/wallpaper`, { method: "PUT", body: formData });
+    state.chatWallpapers.set(state.selectedChat.id, wallpaper);
+    applyChatWallpaper();
+    renderWallpaperColors();
+    renderWallpaperStickers();
+}
+
+async function setWallpaperImage(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+        alert("Для обоев нужна картинка");
+        return;
+    }
+    const current = readWallpaper();
+    await saveWallpaper(current, { imageFile: file });
+}
+
+async function setWallpaperColor(value) {
+    const current = readWallpaper();
+    await saveWallpaper({ ...current, color: value || "" }, { clearImage: true });
+}
+
+async function toggleWallpaperSticker(urlOrFileId) {
+    if (!urlOrFileId) return;
+    const sticker = state.stickers.find((item) => item.file.id === urlOrFileId || item.file.url === urlOrFileId);
+    if (!sticker) return;
+    const current = readWallpaper();
+    const stickers = Array.isArray(current.stickers) ? [...current.stickers] : [];
+    stickers.push(sticker.file);
+    await saveWallpaper({ ...current, stickers: stickers.slice(-40) });
+}
+
+async function clearWallpaper() {
+    await saveWallpaper({ color: "", stickers: [] }, { clearImage: true });
+}
+
+function renderWallpaperStickers() {
+    if (!els.wallpaperStickerList) return;
+    const current = readWallpaper();
+    const counts = new Map();
+    (current.stickers || []).forEach((file) => counts.set(file.id, (counts.get(file.id) || 0) + 1));
+    els.wallpaperStickerList.innerHTML = "";
+    if (!state.stickers.length) {
+        els.wallpaperStickerList.innerHTML = `<div class="empty-state compact">Сначала добавьте стикер из галереи или из картинки в чате</div>`;
+        return;
+    }
+
+    state.stickers.forEach((sticker) => {
+        const count = counts.get(sticker.file.id) || 0;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `sticker-item ${count ? "active" : ""}`;
+        button.dataset.wallpaperSticker = sticker.file.id;
+        button.innerHTML = `<img src="${sticker.file.url}" alt="">${count ? `<span class="sticker-count">${count}</span>` : ""}`;
+        els.wallpaperStickerList.appendChild(button);
+    });
+}
+
+function closeGroupProfile() {
+    state.groupProfile = null;
+    els.groupProfileScrim.classList.add("hidden");
+    els.groupProfilePanel.classList.add("hidden");
+}
+
+function renderGroupProfileAddMembers(profile) {
+    const memberIds = new Set((profile.members || []).map((member) => member.id));
+    const candidates = state.users.filter((user) => !memberIds.has(user.id));
+    els.groupProfileAddMembers.innerHTML = "";
+    if (!profile.canManage) {
+        els.openAddGroupMembersButton.classList.add("hidden");
+        return;
+    }
+    els.openAddGroupMembersButton.classList.remove("hidden");
+    if (!candidates.length) {
+        els.groupProfileAddMembers.innerHTML = `<div class="empty-state compact">Все пользователи уже в группе</div>`;
+        return;
+    }
+    renderCheckboxes(els.groupProfileAddMembers, candidates);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Добавить выбранных";
+    button.addEventListener("click", async () => {
+        const ids = checkedValues(els.groupProfileAddMembers);
+        for (const userId of ids) {
+            await api(`/chats/${profile.chat.id}/members`, { method: "POST", body: { userId, role: "member" } });
+        }
+        await openGroupProfile(profile.chat.id);
+        await loadChats();
+    });
+    els.groupProfileAddMembers.appendChild(button);
+}
+
+function renderGroupProfile(profile) {
+    state.groupProfile = profile;
+    els.groupProfileTitle.textContent = profile.chat.title;
+    els.groupProfileSubtitle.textContent = `${profile.members.length} участников · ${profile.media.length} медиа`;
+    els.groupProfileForm.classList.toggle("hidden", !profile.canManage);
+    els.groupProfileAddMembers.classList.add("hidden");
+    els.groupProfileMembers.classList.add("hidden");
+    els.groupProfileName.value = profile.chat.title;
+    els.groupProfileMembers.innerHTML = (profile.members || [])
+        .map(
+            (member) => `
+                <div class="person-row compact">
+                    <span class="avatar-button small">${avatarContent(member)}</span>
+                    <span class="person-main">
+                        <strong>${escapeHtml(member.name)}</strong>
+                        <small>@${escapeHtml(member.tag)} · ${roleLabel(member.role)}</small>
+                    </span>
+                </div>
+            `
+        )
+        .join("");
+    els.groupProfileMedia.innerHTML = profile.media.length
+        ? profile.media
+              .map((item, index) => {
+                  const file = item.file;
+                  const thumb =
+                      file.type === "image"
+                          ? `<img src="${file.url}" alt="">`
+                          : file.type === "video"
+                            ? `<video src="${file.url}" muted preload="metadata" playsinline></video>`
+                            : `<span>${file.type === "audio" ? "Аудио" : "Файл"}</span>`;
+                  return `<button class="group-media-item ${item.style === "circle" ? "circle" : ""}" type="button" data-group-media-index="${index}">${thumb}</button>`;
+              })
+              .join("")
+        : `<div class="empty-state compact">Медиа пока нет</div>`;
+    renderGroupProfileAddMembers(profile);
+}
+
+async function openGroupProfile(chatId = state.selectedChat?.id) {
+    if (!chatId) return;
+    const profile = await api(`/chats/${encodeURIComponent(chatId)}/profile`);
+    renderGroupProfile(profile);
+    els.groupProfileScrim.classList.remove("hidden");
+    els.groupProfilePanel.classList.remove("hidden");
+}
+
+function openMediaItems(items, index = 0) {
+    state.mediaItems = items.map((item) => ({
+        id: item.file?.id || item.id,
+        url: item.file?.url || item.url,
+        type: item.file?.type || item.type,
+        style: item.style || "",
+        name: item.file?.originalName || item.name || "",
+        downloadUrl: `${item.file?.url || item.url}?download=1`,
+    }));
+    state.mediaIndex = Math.max(0, Math.min(index, state.mediaItems.length - 1));
+    renderMediaViewer();
+    els.imageViewerScrim.classList.remove("hidden");
+    els.imageViewer.classList.remove("hidden");
+}
+
+async function saveGroupProfile(event) {
+    event.preventDefault();
+    if (!state.groupProfile?.chat?.id) return;
+    const updated = await api(`/chats/${state.groupProfile.chat.id}/profile`, {
+        method: "PUT",
+        body: new FormData(event.currentTarget),
+    });
+    await loadChats();
+    const chat = state.chats.find((item) => item.id === updated.id);
+    if (chat) {
+        state.selectedChat = chat;
+        els.chatAvatar.innerHTML = avatarContent(chat);
+        els.chatTitle.textContent = chat.title;
+    }
+    await openGroupProfile(updated.id);
+}
+
+async function createStickerFromUpload(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+        alert("Для стикера нужна картинка");
+        return;
+    }
+    const formData = new FormData();
+    formData.append("image", file);
+    await api("/stickers/upload", { method: "POST", body: formData });
+    await loadStickers();
+    renderStickers();
+    renderWallpaperStickers();
+}
+
 async function logout() {
     await api("/logout", { method: "POST", body: {} }).catch(() => {});
     window.location = "index.html";
@@ -1852,6 +2147,7 @@ document.querySelectorAll(".nav-button").forEach((button) =>
 els.headerAvatar.addEventListener("click", () => openUserProfile(state.me?.id));
 els.chatAvatar.addEventListener("click", () => {
     if (els.chatAvatar.dataset.userId) openUserProfile(els.chatAvatar.dataset.userId);
+    else if (els.chatAvatar.dataset.chatId) openGroupProfile(els.chatAvatar.dataset.chatId).catch((error) => alert(error.message));
 });
 els.themeButton.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 els.logoutButton.addEventListener("click", logout);
@@ -1873,18 +2169,36 @@ els.closeForwardButton.addEventListener("click", closeForwardPanel);
 els.stickerButton.addEventListener("click", () => openStickerPanel().catch((error) => alert(error.message)));
 els.stickerScrim.addEventListener("click", closeStickerPanel);
 els.closeStickerButton.addEventListener("click", closeStickerPanel);
+els.stickerImage.addEventListener("change", () => {
+    createStickerFromUpload(els.stickerImage.files[0]).catch((error) => alert(error.message));
+    els.stickerImage.value = "";
+});
+els.groupProfileScrim.addEventListener("click", closeGroupProfile);
+els.closeGroupProfileButton.addEventListener("click", closeGroupProfile);
+els.groupProfileForm.addEventListener("submit", (event) => saveGroupProfile(event).catch((error) => alert(error.message)));
+els.openAddGroupMembersButton.addEventListener("click", () => {
+    els.groupProfileAddMembers.classList.toggle("hidden");
+});
+els.toggleGroupMembersButton.addEventListener("click", () => {
+    els.groupProfileMembers.classList.toggle("hidden");
+});
+els.groupProfileMedia.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-group-media-index]");
+    if (!item || !state.groupProfile) return;
+    openMediaItems(state.groupProfile.media, Number(item.dataset.groupMediaIndex || 0));
+});
 els.wallpaperScrim.addEventListener("click", closeWallpaperPanel);
 els.closeWallpaperButton.addEventListener("click", closeWallpaperPanel);
-els.clearWallpaperButton.addEventListener("click", clearWallpaper);
+els.clearWallpaperButton.addEventListener("click", () => clearWallpaper().catch((error) => alert(error.message)));
 els.wallpaperColors.addEventListener("click", (event) => {
     const button = event.target.closest("[data-wallpaper-color]");
     if (!button) return;
-    setWallpaperColor(button.dataset.wallpaperColor || "");
+    setWallpaperColor(button.dataset.wallpaperColor || "").catch((error) => alert(error.message));
 });
 els.wallpaperStickerList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-wallpaper-sticker]");
     if (!button) return;
-    toggleWallpaperSticker(button.dataset.wallpaperSticker);
+    toggleWallpaperSticker(button.dataset.wallpaperSticker).catch((error) => alert(error.message));
 });
 els.wallpaperImage.addEventListener("change", () => {
     setWallpaperImage(els.wallpaperImage.files[0]).catch((error) => alert(error.message));
@@ -1989,6 +2303,7 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !els.groupForm.classList.contains("hidden")) closeGroupForm();
     if (event.key === "Escape" && !els.messageActionSheet.classList.contains("hidden")) closeMessageActions();
     if (event.key === "Escape" && !els.forwardPanel.classList.contains("hidden")) closeForwardPanel();
+    if (event.key === "Escape" && !els.groupProfilePanel.classList.contains("hidden")) closeGroupProfile();
     if (event.key === "Escape" && !els.wallpaperPanel.classList.contains("hidden")) closeWallpaperPanel();
     if (event.key === "Escape" && !els.imageViewer.classList.contains("hidden")) closeImageViewer();
     if (!els.imageViewer.classList.contains("hidden") && event.key === "ArrowLeft") moveMediaViewer(-1);
@@ -2021,6 +2336,27 @@ socket.on("messageDeleted", async ({ id, mode }) => {
     if (mode === "all") {
         await loadMessages();
     }
+});
+
+socket.on("chatWallpaperUpdated", ({ chatId, wallpaper }) => {
+    state.chatWallpapers.set(chatId, wallpaper || {});
+    if (state.selectedChat?.id === chatId) {
+        applyChatWallpaper();
+        renderWallpaperColors();
+        renderWallpaperStickers();
+    }
+});
+
+socket.on("chatUpdated", async (chat) => {
+    const index = state.chats.findIndex((item) => item.id === chat.id);
+    if (index === -1) state.chats.push(chat);
+    else state.chats[index] = { ...state.chats[index], ...chat };
+    if (state.selectedChat?.id === chat.id) {
+        state.selectedChat = { ...state.selectedChat, ...chat };
+        els.chatAvatar.innerHTML = avatarContent(state.selectedChat);
+        els.chatTitle.textContent = state.selectedChat.title;
+    }
+    renderChats();
 });
 
 socket.on("chatRead", async ({ chatId, readerId, readMessageIds }) => {

@@ -196,7 +196,35 @@
                 </div>
                 <button class="icon-button" type="button" id="closeStickerButton" aria-label="Закрыть">×</button>
             </div>
+            <div class="sticker-upload-row">
+                <label class="ghost-button sticker-upload-button" for="stickerImage">Сделать стикер из картинки</label>
+                <input type="file" id="stickerImage" accept="image/*" hidden>
+            </div>
             <div id="stickerList" class="sticker-list"></div>
+        </div>
+
+        <div class="modal-scrim hidden" id="groupProfileScrim"></div>
+        <div class="forward-panel group-profile-panel hidden" id="groupProfilePanel">
+            <div class="group-panel-head">
+                <div>
+                    <strong id="groupProfileTitle">Группа</strong>
+                    <span id="groupProfileSubtitle">Участники и медиа</span>
+                </div>
+                <button class="icon-button" type="button" id="closeGroupProfileButton" aria-label="Закрыть">×</button>
+            </div>
+            <form class="group-profile-form hidden" id="groupProfileForm">
+                <input type="text" name="title" id="groupProfileName" maxlength="80" placeholder="Название группы">
+                <input type="file" name="avatar" accept="image/*">
+                <button type="submit">Сохранить группу</button>
+            </form>
+            <div class="dual-actions group-profile-actions">
+                <button type="button" id="openAddGroupMembersButton">Добавить</button>
+                <button class="ghost-button" type="button" id="toggleGroupMembersButton">Участники</button>
+            </div>
+            <div class="checkbox-list hidden" id="groupProfileAddMembers"></div>
+            <div class="people-list hidden" id="groupProfileMembers"></div>
+            <div class="section-title">Медиа группы</div>
+            <div class="group-media-grid" id="groupProfileMedia"></div>
         </div>
 
         <div class="modal-scrim hidden" id="wallpaperScrim"></div>

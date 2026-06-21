@@ -1565,6 +1565,96 @@ button.attachment {
     outline-offset: -2px;
 }
 
+.sticker-upload-row {
+    display: grid;
+}
+
+.sticker-upload-button {
+    min-height: 42px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+}
+
+.sticker-item {
+    position: relative;
+}
+
+.sticker-count {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    min-width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.group-profile-panel {
+    gap: 10px;
+}
+
+.group-profile-form {
+    display: grid;
+    gap: 8px;
+}
+
+.group-profile-actions {
+    grid-template-columns: 1fr 1fr;
+}
+
+.person-row.compact {
+    min-height: 52px;
+    padding: 8px;
+}
+
+.group-media-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.group-media-item {
+    aspect-ratio: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--surface-soft);
+    color: var(--muted);
+}
+
+.group-media-item img,
+.group-media-item video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.group-media-item.circle,
+.group-media-item.circle video {
+    border-radius: 50%;
+}
+
+.media-viewer.circle-mode {
+    place-items: center;
+}
+
+.media-viewer.circle-mode video {
+    width: min(82vw, 380px);
+    height: min(82vw, 380px);
+    border-radius: 50%;
+    object-fit: cover;
+    background: #05070a;
+}
+
 .comment-tree,
 .comment-children {
     display: grid;

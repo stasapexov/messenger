@@ -49,6 +49,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 250);
 const SESSION_DAYS = Number(process.env.SESSION_DAYS || 30);
+const MOBILE_SESSION_DAYS = Number(process.env.MOBILE_SESSION_DAYS || 30);
 const COOKIE_SECURE = readEnvFlag("COOKIE_SECURE", process.env.NODE_ENV === "production");
 const WEB_PUSH_SUBJECT = process.env.WEB_PUSH_SUBJECT || "mailto:admin@example.com";
 
@@ -342,6 +343,68 @@ function getUserFromCookie(cookieHeader) {
     return session || null;
 }
 
+function createMobileSession(user, req) {
+    const token = crypto.randomBytes(32).toString("base64url");
+    const createdAt = now();
+    const expiresAt = new Date(Date.now() + MOBILE_SESSION_DAYS * 86400 * 1000).toISOString();
+
+    run(
+        `INSERT INTO mobile_sessions (id, user_id, token_hash, user_agent, ip, created_at, expires_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            makeId("mobile"),
+            user.id,
+            tokenHash(token),
+            String(req.headers["user-agent"] || "").slice(0, 500),
+            req.ip || "",
+            createdAt,
+            expiresAt,
+            createdAt,
+        ]
+    );
+
+    return { token, expiresAt };
+}
+
+function mobileTokenFromRequest(req) {
+    const header = String(req.headers.authorization || "");
+    const match = /^Bearer\s+(.+)$/i.exec(header);
+    return String(match?.[1] || req.body?.mobileToken || req.query?.mobileToken || "").trim();
+}
+
+function getUserFromMobileToken(token) {
+    if (!token) return null;
+
+    const session = get(
+        `SELECT mobile_sessions.id AS mobile_session_id, users.*
+         FROM mobile_sessions
+         JOIN users ON users.id = mobile_sessions.user_id
+         WHERE mobile_sessions.token_hash = ?
+           AND mobile_sessions.expires_at > ?
+           AND mobile_sessions.revoked_at IS NULL`,
+        [tokenHash(token), now()]
+    );
+
+    if (session?.mobile_session_id) {
+        run("UPDATE mobile_sessions SET last_used_at = ? WHERE id = ?", [now(), session.mobile_session_id]);
+    }
+
+    return session || null;
+}
+
+function requireMobileUser(req, res, next) {
+    const token = mobileTokenFromRequest(req);
+    const user = getUserFromMobileToken(token);
+    if (!user) {
+        return res.status(401).json({ error: "Mobile token is invalid or expired" });
+    }
+
+    req.currentUser = user;
+    req.mobileToken = token;
+    req.mobileSessionId = user.mobile_session_id;
+    next();
+}
+
 function requireUser(req, res, next) {
     const user = getUserFromCookie(req.headers.cookie);
     if (!user) {
@@ -444,6 +507,19 @@ function createSchema() {
             ip TEXT,
             created_at TEXT NOT NULL,
             expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS mobile_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            user_agent TEXT,
+            ip TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
@@ -640,7 +716,21 @@ function createSchema() {
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS chat_wallpapers (
+            chat_id TEXT PRIMARY KEY,
+            color TEXT NOT NULL DEFAULT '',
+            image_file_id TEXT,
+            sticker_file_ids TEXT NOT NULL DEFAULT '[]',
+            updated_by TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+            FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE SET NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_mobile_sessions_user ON mobile_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_mobile_sessions_token ON mobile_sessions(token_hash);
         CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id);
         CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id, read_at);
@@ -732,6 +822,34 @@ function migrateSchema() {
     if (!newsCommentColumns.some((column) => column.name === "parent_id")) {
         run("ALTER TABLE news_comments ADD COLUMN parent_id TEXT");
     }
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS mobile_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            user_agent TEXT,
+            ip TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_used_at TEXT,
+            revoked_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mobile_sessions_user ON mobile_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_mobile_sessions_token ON mobile_sessions(token_hash);
+        CREATE TABLE IF NOT EXISTS chat_wallpapers (
+            chat_id TEXT PRIMARY KEY,
+            color TEXT NOT NULL DEFAULT '',
+            image_file_id TEXT,
+            sticker_file_ids TEXT NOT NULL DEFAULT '[]',
+            updated_by TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+            FOREIGN KEY (image_file_id) REFERENCES files(id) ON DELETE SET NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+    `);
 }
 
 function getSetting(key) {
@@ -847,6 +965,89 @@ function getChatMembers(chatId) {
     );
 }
 
+function wallpaperForClient(chatId) {
+    const row = get("SELECT * FROM chat_wallpapers WHERE chat_id = ?", [chatId]);
+    if (!row) {
+        return {
+            color: "",
+            image: null,
+            stickers: [],
+            updatedAt: null,
+        };
+    }
+
+    const stickerIds = jsonList(row.sticker_file_ids).slice(0, 40);
+    const stickers = stickerIds
+        .map((fileId) => publicFile(get("SELECT * FROM files WHERE id = ?", [fileId])))
+        .filter(Boolean);
+
+    return {
+        color: row.color || "",
+        image: publicFile(get("SELECT * FROM files WHERE id = ?", [row.image_file_id])),
+        stickers,
+        updatedAt: row.updated_at,
+        updatedBy: row.updated_by,
+    };
+}
+
+function saveChatWallpaper(chatId, user, payload = {}, imageFile = null) {
+    requireChatMember(chatId, user.id);
+    ensureNotBanned(user);
+
+    const color = String(payload.color || "").trim().slice(0, 140);
+    const resetImage = payload.clearImage === "1" || payload.clearImage === true;
+    const existing = get("SELECT * FROM chat_wallpapers WHERE chat_id = ?", [chatId]);
+    const imageFileId = imageFile ? fileFromUpload(imageFile, user.id).id : resetImage ? null : existing?.image_file_id || null;
+    const stickerIds = jsonList(payload.stickerFileIds)
+        .map((fileId) => String(fileId || "").trim())
+        .filter(Boolean)
+        .slice(0, 40);
+
+    stickerIds.forEach((fileId) => {
+        const file = get("SELECT * FROM files WHERE id = ?", [fileId]);
+        if (!file || !String(file.mime_type || "").startsWith("image/") || !canAccessFile(user.id, fileId)) {
+            const error = new Error("РЎС‚РёРєРµСЂ РґР»СЏ РѕР±РѕРµРІ РЅРµ РЅР°Р№РґРµРЅ");
+            error.status = 404;
+            throw error;
+        }
+    });
+
+    const stamp = now();
+    run(
+        `INSERT INTO chat_wallpapers (chat_id, color, image_file_id, sticker_file_ids, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET
+            color = excluded.color,
+            image_file_id = excluded.image_file_id,
+            sticker_file_ids = excluded.sticker_file_ids,
+            updated_by = excluded.updated_by,
+            updated_at = excluded.updated_at`,
+        [chatId, color, imageFileId, JSON.stringify(stickerIds), user.id, stamp]
+    );
+
+    return wallpaperForClient(chatId);
+}
+
+function chatMediaForClient(chatId, userId) {
+    requireChatMember(chatId, userId);
+    return all(
+        `SELECT messages.id AS message_id, messages.created_at, messages.style, files.*
+         FROM message_attachments
+         JOIN messages ON messages.id = message_attachments.message_id
+         JOIN files ON files.id = message_attachments.file_id
+         WHERE messages.chat_id = ?
+           AND messages.deleted_for_all = 0
+           AND (files.mime_type LIKE 'image/%' OR files.mime_type LIKE 'video/%' OR files.mime_type LIKE 'audio/%')
+         ORDER BY messages.created_at DESC`,
+        [chatId]
+    ).map((row) => ({
+        messageId: row.message_id,
+        style: row.style || "",
+        createdAt: row.created_at,
+        file: publicFile(row),
+    }));
+}
+
 function unreadCount(chatId, userId) {
     return get(
         `SELECT COUNT(*) AS count
@@ -892,6 +1093,18 @@ function markChatRead(chatId, userId) {
     });
 
     return { readMessageIds: messages.map((message) => message.id), readAt: stamp };
+}
+
+function emitChatRead(chatId, readerId, result) {
+    if (!result.readMessageIds.length) return;
+    getChatMembers(chatId).forEach((member) =>
+        io.to(`user_${member.id}`).emit("chatRead", {
+            chatId,
+            readerId,
+            readMessageIds: result.readMessageIds,
+            readAt: result.readAt,
+        })
+    );
 }
 
 function chatForUser(chat, currentUserId) {
@@ -942,6 +1155,35 @@ function listChats(userId) {
          ORDER BY chats.updated_at DESC`,
         [userId]
     ).map((chat) => chatForUser(chat, userId));
+}
+
+function listChatMessages(chatId, userId, options = {}) {
+    requireChatMember(chatId, userId);
+    const limit = Math.max(1, Math.min(100, Number(options.limit || 50)));
+    let before = options.beforeCreatedAt || options.before || "9999-12-31T23:59:59.999Z";
+
+    if (options.beforeMessageId) {
+        const beforeMessage = get("SELECT created_at FROM messages WHERE id = ? AND chat_id = ?", [options.beforeMessageId, chatId]);
+        if (beforeMessage?.created_at) before = beforeMessage.created_at;
+    }
+
+    return all(
+        `SELECT messages.*
+         FROM messages
+         WHERE messages.chat_id = ?
+           AND messages.created_at < ?
+           AND NOT EXISTS (
+                SELECT 1 FROM message_deletions
+                WHERE message_deletions.message_id = messages.id
+                  AND message_deletions.user_id = ?
+           )
+         ORDER BY messages.created_at DESC
+         LIMIT ?`,
+        [chatId, before, userId, limit]
+    )
+        .reverse()
+        .map((row) => messageForClient(row, userId))
+        .filter(Boolean);
 }
 
 function sortedDirectPair(a, b) {
@@ -1059,6 +1301,7 @@ function messageForClient(message, currentUserId, options = {}) {
         recipientCount: Math.max(0, members.length - 1),
         readBy: readRows.map((row) => ({ id: row.user_id, name: row.name, tag: row.tag, readAt: row.read_at })),
         readByMe: Boolean(get("SELECT 1 FROM message_reads WHERE message_id = ? AND user_id = ?", [message.id, currentUserId])),
+        clientNonce: message.client_nonce || null,
         editedAt: message.edited_at,
         createdAt: message.created_at,
     };
@@ -1225,7 +1468,35 @@ function canAccessFile(userId, fileId) {
     if (file.owner_id === userId) return true;
 
     if (get("SELECT 1 FROM users WHERE avatar_file_id = ?", [fileId])) return true;
+    if (
+        get(
+            `SELECT 1
+             FROM chats
+             JOIN chat_members ON chat_members.chat_id = chats.id
+             WHERE chats.avatar_file_id = ?
+               AND chat_members.user_id = ?`,
+            [fileId, userId]
+        )
+    ) {
+        return true;
+    }
     if (get("SELECT 1 FROM stickers WHERE file_id = ? AND user_id = ?", [fileId, userId])) return true;
+
+    if (
+        get(
+            `SELECT 1
+             FROM chat_wallpapers
+             JOIN chat_members ON chat_members.chat_id = chat_wallpapers.chat_id
+             WHERE chat_members.user_id = ?
+               AND (
+                    chat_wallpapers.image_file_id = ?
+                    OR chat_wallpapers.sticker_file_ids LIKE ?
+               )`,
+            [userId, fileId, `%"${fileId}"%`]
+        )
+    ) {
+        return true;
+    }
 
     if (
         get(
@@ -1455,6 +1726,140 @@ app.get("/users", requireUser, (req, res) => {
     res.json(users);
 });
 
+app.post("/api/mobile/register", (req, res) => {
+    try {
+        const login = normalizeLogin(req.body.login);
+        const password = String(req.body.password || "");
+        const name = String(req.body.name || "").trim().slice(0, 60);
+        const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
+
+        if (!validateLogin(login)) {
+            return res.status(400).json({ error: "Login must be 3-32 characters: latin letters, numbers, dot, dash or underscore" });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ error: "Password must be at least 6 characters" });
+        }
+        if (name.length < 2) {
+            return res.status(400).json({ error: "Enter a display name" });
+        }
+
+        const invite = get("SELECT * FROM invite_codes WHERE code = ?", [inviteCode]);
+        if (!invite || !invite.is_active || invite.used_count >= invite.max_uses || (invite.expires_at && invite.expires_at < now())) {
+            return res.status(403).json({ error: "Invite code is invalid" });
+        }
+
+        const user = tx(() => {
+            if (get("SELECT id FROM users WHERE login = ?", [login])) {
+                const error = new Error("Login is already taken");
+                error.status = 409;
+                throw error;
+            }
+
+            const tag = normalizeTag(login);
+            if (get("SELECT id FROM users WHERE tag = ?", [tag])) {
+                const error = new Error("Tag is already taken");
+                error.status = 409;
+                throw error;
+            }
+
+            const stamp = now();
+            const id = makeId("user");
+            const role = normalizeRole(invite.role_on_signup);
+            run(
+                `INSERT INTO users (id, login, password_hash, name, tag, role, is_admin, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [id, login, hashPassword(password), name, tag, role, role === "admin" ? 1 : 0, stamp, stamp]
+            );
+            run("UPDATE invite_codes SET used_count = used_count + 1 WHERE id = ?", [invite.id]);
+            return getUserById(id);
+        });
+
+        res.status(201).json({ success: true, user: publicUser(user) });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.post("/api/mobile/login", (req, res) => {
+    try {
+        const login = normalizeLogin(req.body.login);
+        const password = String(req.body.password || "");
+        const key = `${req.ip}:${login}`;
+
+        if (!allowLoginAttempt(key)) {
+            return res.status(429).json({ error: "Слишком много попыток входа. Попробуйте позже" });
+        }
+
+        const user = get("SELECT * FROM users WHERE login = ?", [login]);
+        if (!user || !verifyPassword(password, user.password_hash)) {
+            return res.status(401).json({ error: "Неверный логин или пароль" });
+        }
+        if (user.banned_at) {
+            return res.status(403).json({ error: user.banned_reason ? `Вы забанены: ${user.banned_reason}` : "Вы забанены" });
+        }
+
+        const mobileSession = createMobileSession(user, req);
+        run("UPDATE users SET last_seen_at = ? WHERE id = ?", [now(), user.id]);
+
+        res.json({
+            user: publicUser(getUserById(user.id)),
+            mobileToken: mobileSession.token,
+            expiresAt: mobileSession.expiresAt,
+        });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.post("/api/mobile/logout", requireMobileUser, (req, res) => {
+    run("UPDATE mobile_sessions SET revoked_at = ? WHERE id = ?", [now(), req.mobileSessionId]);
+    res.json({ success: true });
+});
+
+app.get("/api/mobile/me", requireMobileUser, (req, res) => {
+    res.json(publicUser(req.currentUser));
+});
+
+app.get("/api/mobile/chats", requireMobileUser, (req, res) => {
+    res.json(listChats(req.currentUser.id));
+});
+
+app.get("/api/mobile/chats/:id/messages", requireMobileUser, (req, res) => {
+    try {
+        res.json(
+            listChatMessages(req.params.id, req.currentUser.id, {
+                limit: req.query.limit,
+                before: req.query.before,
+                beforeMessageId: req.query.beforeMessageId,
+                beforeCreatedAt: req.query.beforeCreatedAt,
+            })
+        );
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.post("/api/mobile/chats/:id/read", requireMobileUser, (req, res) => {
+    try {
+        const result = markChatRead(req.params.id, req.currentUser.id);
+        emitChatRead(req.params.id, req.currentUser.id, result);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.post("/api/mobile/chats/:id/messages", requireMobileUser, (req, res) => {
+    try {
+        const message = insertMessage(req.currentUser, req.params.id, req.body);
+        io.to(`user_${req.currentUser.id}`).emit("newMessage", message);
+        notifyChatMembers(req.params.id, req.currentUser.id, message);
+        res.status(201).json(message);
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
 app.put("/profile", requireUser, upload.single("avatar"), (req, res) => {
     try {
         ensureNotBanned(req.currentUser);
@@ -1677,6 +2082,7 @@ app.post("/admin/users/:id/reset-password", requireAdmin, (req, res) => {
 
     run("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", [hashPassword(password), now(), user.id]);
     run("DELETE FROM sessions WHERE user_id = ?", [user.id]);
+    run("UPDATE mobile_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", [now(), user.id]);
     res.json({ success: true, temporaryPassword: password });
 });
 
@@ -1691,12 +2097,18 @@ app.post("/files", requireUser, upload.single("file"), (req, res) => {
     }
 });
 
-app.get("/files/:id", requireUser, (req, res) => {
-    const file = get("SELECT * FROM files WHERE id = ?", [req.params.id]);
-    if (!file || !canAccessFile(req.currentUser.id, file.id)) {
-        return res.status(404).send("Not found");
+app.post("/api/mobile/files", requireMobileUser, upload.single("file"), (req, res) => {
+    try {
+        ensureNotBanned(req.currentUser);
+        if (!req.file) return res.status(400).json({ error: "File was not selected" });
+        const file = fileFromUpload(req.file, req.currentUser.id);
+        res.status(201).json(publicFile(file));
+    } catch (error) {
+        handleError(res, error);
     }
+});
 
+function streamStoredFile(req, res, file) {
     const absolutePath = path.join(FILE_DIR, file.stored_name);
     if (!absolutePath.startsWith(FILE_DIR) || !fs.existsSync(absolutePath)) {
         return res.status(404).send("Not found");
@@ -1732,6 +2144,24 @@ app.get("/files/:id", requireUser, (req, res) => {
 
     res.setHeader("Content-Length", stat.size);
     fs.createReadStream(absolutePath).pipe(res);
+}
+
+app.get("/api/mobile/files/:id", requireMobileUser, (req, res) => {
+    const file = get("SELECT * FROM files WHERE id = ?", [req.params.id]);
+    if (!file || !canAccessFile(req.currentUser.id, file.id)) {
+        return res.status(404).send("Not found");
+    }
+
+    streamStoredFile(req, res, file);
+});
+
+app.get("/files/:id", requireUser, (req, res) => {
+    const file = get("SELECT * FROM files WHERE id = ?", [req.params.id]);
+    if (!file || !canAccessFile(req.currentUser.id, file.id)) {
+        return res.status(404).send("Not found");
+    }
+
+    streamStoredFile(req, res, file);
 });
 
 function stickerForClient(sticker) {
@@ -1775,6 +2205,27 @@ app.post("/stickers", requireUser, (req, res) => {
     );
     const sticker = get("SELECT * FROM stickers WHERE user_id = ? AND file_id = ?", [req.currentUser.id, file.id]);
     res.status(201).json(stickerForClient(sticker));
+});
+
+app.post("/stickers/upload", requireUser, upload.single("image"), (req, res) => {
+    try {
+        ensureNotBanned(req.currentUser);
+        if (!req.file) return res.status(400).json({ error: "Р’С‹Р±РµСЂРёС‚Рµ РєР°СЂС‚РёРЅРєСѓ" });
+        if (!String(req.file.mimetype || "").startsWith("image/")) {
+            return res.status(400).json({ error: "РЎС‚РёРєРµСЂРѕРј РјРѕР¶РµС‚ Р±С‹С‚СЊ С‚РѕР»СЊРєРѕ РєР°СЂС‚РёРЅРєР°" });
+        }
+        const file = fileFromUpload(req.file, req.currentUser.id);
+        const id = makeId("sticker");
+        run(
+            `INSERT OR IGNORE INTO stickers (id, user_id, file_id, created_at)
+             VALUES (?, ?, ?, ?)`,
+            [id, req.currentUser.id, file.id, now()]
+        );
+        const sticker = get("SELECT * FROM stickers WHERE user_id = ? AND file_id = ?", [req.currentUser.id, file.id]);
+        res.status(201).json(stickerForClient(sticker));
+    } catch (error) {
+        handleError(res, error);
+    }
 });
 
 app.get("/chats", requireUser, (req, res) => {
@@ -1825,6 +2276,76 @@ app.post("/chats/group", requireUser, (req, res) => {
     }
 });
 
+app.get("/chats/:id/wallpaper", requireUser, (req, res) => {
+    try {
+        requireChatMember(req.params.id, req.currentUser.id);
+        res.json(wallpaperForClient(req.params.id));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.put("/chats/:id/wallpaper", requireUser, upload.single("image"), (req, res) => {
+    try {
+        const wallpaper = saveChatWallpaper(req.params.id, req.currentUser, req.body, req.file);
+        getChatMembers(req.params.id).forEach((member) => {
+            io.to(`user_${member.id}`).emit("chatWallpaperUpdated", {
+                chatId: req.params.id,
+                wallpaper,
+            });
+        });
+        res.json(wallpaper);
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.get("/chats/:id/profile", requireUser, (req, res) => {
+    try {
+        const chat = get("SELECT * FROM chats WHERE id = ?", [req.params.id]);
+        if (!chat || chat.type !== "group") return res.status(404).json({ error: "Р“СЂСѓРїРїР° РЅРµ РЅР°Р№РґРµРЅР°" });
+        requireChatMember(chat.id, req.currentUser.id);
+        res.json({
+            chat: chatForUser(chat, req.currentUser.id),
+            members: getChatMembers(chat.id).map(publicUser),
+            media: chatMediaForClient(chat.id, req.currentUser.id),
+            canManage: Boolean(canManageChat(chat.id, req.currentUser)),
+        });
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.put("/chats/:id/profile", requireUser, upload.single("avatar"), (req, res) => {
+    try {
+        const chat = get("SELECT * FROM chats WHERE id = ?", [req.params.id]);
+        if (!chat || chat.type !== "group") return res.status(404).json({ error: "Р“СЂСѓРїРїР° РЅРµ РЅР°Р№РґРµРЅР°" });
+        if (!canManageChat(chat.id, req.currentUser)) return res.status(403).json({ error: "РќРµС‚ РїСЂР°РІ" });
+        const title = String(req.body.title || chat.title || "").trim().slice(0, 80);
+        let avatarId = chat.avatar_file_id;
+        if (req.file) {
+            if (!String(req.file.mimetype || "").startsWith("image/")) {
+                return res.status(400).json({ error: "РђРІР°С‚Р°СЂРєР° РіСЂСѓРїРїС‹ РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РєР°СЂС‚РёРЅРєРѕР№" });
+            }
+            avatarId = fileFromUpload(req.file, req.currentUser.id).id;
+        }
+        run("UPDATE chats SET title = ?, avatar_file_id = ?, updated_at = ? WHERE id = ?", [title || chat.title, avatarId, now(), chat.id]);
+        const updated = chatForUser(get("SELECT * FROM chats WHERE id = ?", [chat.id]), req.currentUser.id);
+        getChatMembers(chat.id).forEach((member) => io.to(`user_${member.id}`).emit("chatUpdated", updated));
+        res.json(updated);
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
+app.get("/chats/:id/media", requireUser, (req, res) => {
+    try {
+        res.json(chatMediaForClient(req.params.id, req.currentUser.id));
+    } catch (error) {
+        handleError(res, error);
+    }
+});
+
 app.post("/chats/:id/members", requireUser, (req, res) => {
     try {
         if (!canManageChat(req.params.id, req.currentUser)) return res.status(403).json({ error: "Нет прав" });
@@ -1858,25 +2379,14 @@ app.delete("/chats/:id/members/:userId", requireUser, (req, res) => {
 
 app.get("/chats/:id/messages", requireUser, (req, res) => {
     try {
-        requireChatMember(req.params.id, req.currentUser.id);
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
-        const before = req.query.before ? String(req.query.before) : "9999-12-31T23:59:59.999Z";
-        const rows = all(
-            `SELECT messages.*
-             FROM messages
-             WHERE messages.chat_id = ?
-               AND messages.created_at < ?
-               AND NOT EXISTS (
-                    SELECT 1 FROM message_deletions
-                    WHERE message_deletions.message_id = messages.id
-                      AND message_deletions.user_id = ?
-               )
-             ORDER BY messages.created_at DESC
-             LIMIT ?`,
-            [req.params.id, before, req.currentUser.id, limit]
-        ).reverse();
-
-        res.json(rows.map((row) => messageForClient(row, req.currentUser.id)).filter(Boolean));
+        res.json(
+            listChatMessages(req.params.id, req.currentUser.id, {
+                limit: req.query.limit,
+                before: req.query.before,
+                beforeMessageId: req.query.beforeMessageId,
+                beforeCreatedAt: req.query.beforeCreatedAt,
+            })
+        );
     } catch (error) {
         handleError(res, error);
     }
@@ -1897,16 +2407,7 @@ app.post("/chats/:id/messages", requireUser, (req, res) => {
 app.post("/chats/:id/read", requireUser, (req, res) => {
     try {
         const result = markChatRead(req.params.id, req.currentUser.id);
-        if (result.readMessageIds.length) {
-            getChatMembers(req.params.id).forEach((member) =>
-                io.to(`user_${member.id}`).emit("chatRead", {
-                    chatId: req.params.id,
-                    readerId: req.currentUser.id,
-                    readMessageIds: result.readMessageIds,
-                    readAt: result.readAt,
-                })
-            );
-        }
+        emitChatRead(req.params.id, req.currentUser.id, result);
         res.json({ success: true, ...result });
     } catch (error) {
         handleError(res, error);
@@ -2132,7 +2633,8 @@ app.post("/news/:id/comments", requireUser, (req, res) => {
 });
 
 io.use((socket, next) => {
-    const user = getUserFromCookie(socket.handshake.headers.cookie);
+    const mobileToken = String(socket.handshake.auth?.token || "").trim();
+    const user = getUserFromCookie(socket.handshake.headers.cookie) || getUserFromMobileToken(mobileToken);
     if (!user) return next(new Error("unauthorized"));
     socket.user = user;
     next();
