@@ -16,6 +16,11 @@ const state = {
     messageSearch: "",
     sending: false,
     editingNewsId: null,
+    mediaItems: [],
+    mediaIndex: 0,
+    mediaSwipe: null,
+    wallpaperLongPress: null,
+    wallpaperPointer: null,
     voiceStream: null,
     voiceContext: null,
     voiceSource: null,
@@ -93,11 +98,33 @@ const els = {
     stickerPanel: document.getElementById("stickerPanel"),
     closeStickerButton: document.getElementById("closeStickerButton"),
     stickerList: document.getElementById("stickerList"),
+    wallpaperScrim: document.getElementById("wallpaperScrim"),
+    wallpaperPanel: document.getElementById("wallpaperPanel"),
+    closeWallpaperButton: document.getElementById("closeWallpaperButton"),
+    wallpaperColors: document.getElementById("wallpaperColors"),
+    wallpaperImage: document.getElementById("wallpaperImage"),
+    clearWallpaperButton: document.getElementById("clearWallpaperButton"),
+    wallpaperStickerList: document.getElementById("wallpaperStickerList"),
     imageViewerScrim: document.getElementById("imageViewerScrim"),
     imageViewer: document.getElementById("imageViewer"),
     imageViewerImg: document.getElementById("imageViewerImg"),
+    mediaViewerVideo: document.getElementById("mediaViewerVideo"),
+    mediaViewerAudio: document.getElementById("mediaViewerAudio"),
+    prevMediaButton: document.getElementById("prevMediaButton"),
+    nextMediaButton: document.getElementById("nextMediaButton"),
+    mediaViewerCaption: document.getElementById("mediaViewerCaption"),
+    mediaViewerDownload: document.getElementById("mediaViewerDownload"),
     closeImageViewer: document.getElementById("closeImageViewer"),
 };
+
+const WALLPAPER_COLORS = [
+    { id: "default", label: "Светлый", value: "" },
+    { id: "blue", label: "Синий", value: "linear-gradient(145deg, #dbeafe, #eff6ff)" },
+    { id: "pink", label: "Розовый", value: "linear-gradient(145deg, #ffe4ef, #fff7fb)" },
+    { id: "green", label: "Зелёный", value: "linear-gradient(145deg, #dcfce7, #f7fee7)" },
+    { id: "white", label: "Белый", value: "#ffffff" },
+    { id: "dark", label: "Тёмный", value: "linear-gradient(145deg, #111827, #1f2937)" },
+];
 
 function icon(name) {
     const icons = {
@@ -257,9 +284,195 @@ function applyTheme(theme = localStorage.getItem("messengerTheme") || "light") {
     if (els.themeButton) els.themeButton.innerHTML = icon(nextTheme === "dark" ? "sun" : "moon");
 }
 
+function wallpaperKey(chatId = state.selectedChat?.id) {
+    return chatId ? `messengerWallpaper:${chatId}` : "";
+}
+
+function readWallpaper(chatId = state.selectedChat?.id) {
+    const key = wallpaperKey(chatId);
+    if (!key) return {};
+    try {
+        return JSON.parse(localStorage.getItem(key) || "{}") || {};
+    } catch {
+        return {};
+    }
+}
+
+function saveWallpaper(nextWallpaper) {
+    const key = wallpaperKey();
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(nextWallpaper || {}));
+    applyChatWallpaper();
+}
+
+function applyChatWallpaper() {
+    if (!els.messages) return;
+    const wallpaper = readWallpaper();
+    const color = wallpaper.color || "";
+    const image = wallpaper.image || "";
+    const stickers = Array.isArray(wallpaper.stickers) ? wallpaper.stickers.slice(0, 8) : [];
+    const stickerImages = stickers.map((url) => `url("${String(url).replaceAll('"', "%22")}")`);
+    const stickerPositions = stickers.map((_, index) => `${12 + ((index * 31) % 76)}% ${9 + ((index * 23) % 78)}%`);
+    const gradientLayer = color.startsWith("linear-gradient") ? color : "";
+    const imageLayer = image ? `url("${image.replaceAll('"', "%22")}")` : "";
+
+    els.messages.classList.toggle("has-wallpaper", Boolean(color || image || stickerImages.length));
+    els.messages.style.backgroundColor = color && !gradientLayer ? color : "";
+    els.messages.style.backgroundImage = [...stickerImages, imageLayer, gradientLayer]
+        .filter(Boolean)
+        .join(", ");
+    els.messages.style.backgroundSize = [...stickerImages.map(() => "72px 72px"), imageLayer ? "cover" : "", gradientLayer ? "cover" : ""]
+        .filter(Boolean)
+        .join(", ");
+    els.messages.style.backgroundPosition = [...stickerPositions, imageLayer ? "center" : "", gradientLayer ? "center" : ""]
+        .filter(Boolean)
+        .join(", ");
+    els.messages.style.backgroundRepeat = [...stickerImages.map(() => "no-repeat"), imageLayer ? "no-repeat" : "", gradientLayer ? "no-repeat" : ""]
+        .filter(Boolean)
+        .join(", ");
+}
+
+function renderWallpaperColors() {
+    if (!els.wallpaperColors) return;
+    const current = readWallpaper();
+    els.wallpaperColors.innerHTML = "";
+    WALLPAPER_COLORS.forEach((color) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `wallpaper-color ${current.color === color.value ? "active" : ""}`;
+        button.dataset.wallpaperColor = color.value;
+        button.style.background = color.value || "var(--surface-soft)";
+        button.innerHTML = `<span>${escapeHtml(color.label)}</span>`;
+        els.wallpaperColors.appendChild(button);
+    });
+}
+
+function renderWallpaperStickers() {
+    if (!els.wallpaperStickerList) return;
+    const current = readWallpaper();
+    const selected = new Set(current.stickers || []);
+    els.wallpaperStickerList.innerHTML = "";
+    if (!state.stickers.length) {
+        els.wallpaperStickerList.innerHTML = `<div class="empty-state compact">Сначала сохраните стикеры из картинок в чате</div>`;
+        return;
+    }
+
+    state.stickers.forEach((sticker) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `sticker-item ${selected.has(sticker.file.url) ? "active" : ""}`;
+        button.dataset.wallpaperSticker = sticker.file.url;
+        button.innerHTML = `<img src="${sticker.file.url}" alt="">`;
+        els.wallpaperStickerList.appendChild(button);
+    });
+}
+
+async function openWallpaperPanel() {
+    if (!state.selectedChat) return;
+    await loadStickers().catch(() => {});
+    renderWallpaperColors();
+    renderWallpaperStickers();
+    els.wallpaperScrim.classList.remove("hidden");
+    els.wallpaperPanel.classList.remove("hidden");
+}
+
+function closeWallpaperPanel() {
+    els.wallpaperScrim.classList.add("hidden");
+    els.wallpaperPanel.classList.add("hidden");
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result || "")));
+        reader.addEventListener("error", () => reject(reader.error || new Error("Не удалось прочитать файл")));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function setWallpaperImage(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+        alert("Для обоев нужна картинка");
+        return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+        alert("Лучше выбрать картинку до 2 МБ, чтобы localStorage не переполнился");
+    }
+    const current = readWallpaper();
+    saveWallpaper({ ...current, image: await readFileAsDataUrl(file) });
+    renderWallpaperColors();
+}
+
+function setWallpaperColor(value) {
+    const current = readWallpaper();
+    saveWallpaper({ ...current, color: value || "", image: "" });
+    renderWallpaperColors();
+}
+
+function toggleWallpaperSticker(url) {
+    if (!url) return;
+    const current = readWallpaper();
+    const stickers = Array.isArray(current.stickers) ? [...current.stickers] : [];
+    const index = stickers.indexOf(url);
+    if (index === -1) stickers.push(url);
+    else stickers.splice(index, 1);
+    saveWallpaper({ ...current, stickers: stickers.slice(0, 8) });
+    renderWallpaperStickers();
+}
+
+function clearWallpaper() {
+    const key = wallpaperKey();
+    if (key) localStorage.removeItem(key);
+    applyChatWallpaper();
+    renderWallpaperColors();
+    renderWallpaperStickers();
+}
+
+function isMessagesBackground(target) {
+    return target === els.messages || target.classList?.contains("messages");
+}
+
+function bindWallpaperBackgroundPress() {
+    if (!els.messages) return;
+    els.messages.addEventListener("pointerdown", (event) => {
+        if (!isMessagesBackground(event.target)) return;
+        state.wallpaperPointer = { x: event.clientX, y: event.clientY };
+        state.wallpaperLongPress = window.setTimeout(() => {
+            state.wallpaperLongPress = null;
+            openWallpaperPanel().catch((error) => alert(error.message));
+        }, 620);
+    });
+    els.messages.addEventListener("pointermove", (event) => {
+        if (!state.wallpaperPointer || !state.wallpaperLongPress) return;
+        const dx = Math.abs(event.clientX - state.wallpaperPointer.x);
+        const dy = Math.abs(event.clientY - state.wallpaperPointer.y);
+        if (dx > 12 || dy > 12) {
+            window.clearTimeout(state.wallpaperLongPress);
+            state.wallpaperLongPress = null;
+        }
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach((eventName) => {
+        els.messages.addEventListener(eventName, () => {
+            if (state.wallpaperLongPress) window.clearTimeout(state.wallpaperLongPress);
+            state.wallpaperLongPress = null;
+            state.wallpaperPointer = null;
+        });
+    });
+    els.messages.addEventListener("contextmenu", (event) => {
+        if (!isMessagesBackground(event.target)) return;
+        event.preventDefault();
+        openWallpaperPanel().catch((error) => alert(error.message));
+    });
+}
+
 function setupStaticIcons() {
     const fileLabel = document.querySelector('label[for="messageFile"]');
     if (fileLabel) fileLabel.innerHTML = icon("paperclip");
+    const forwardTitle = els.forwardPanel?.querySelector(".group-panel-head strong");
+    const forwardSubtitle = els.forwardPanel?.querySelector(".group-panel-head span");
+    if (forwardTitle) forwardTitle.textContent = "Переслать";
+    if (forwardSubtitle) forwardSubtitle.textContent = "Выберите чат или группу";
     if (els.circleButton) els.circleButton.innerHTML = icon("circleVideo");
     if (els.voiceButton) els.voiceButton.innerHTML = icon("mic");
     if (els.stickerButton) els.stickerButton.innerHTML = icon("sticker");
@@ -423,6 +636,7 @@ async function selectChat(chatId) {
 
 async function loadMessages() {
     if (!state.selectedChat) return;
+    applyChatWallpaper();
     state.messages = await api(`/chats/${state.selectedChat.id}/messages`);
     els.messages.innerHTML = "";
     state.messages.filter(messageMatchesSearch).forEach((message) => addMessage(message));
@@ -658,6 +872,52 @@ async function loadStickers() {
     state.stickers = await api("/stickers");
 }
 
+function renderForwardTargets() {
+    els.forwardTargets.innerHTML = "";
+    const chats = state.chats.filter((chat) => chat.id !== state.selectedChat?.id);
+    if (!chats.length) {
+        els.forwardTargets.innerHTML = `<div class="empty-state compact">Нет других чатов для пересылки</div>`;
+        return;
+    }
+
+    chats.forEach((chat) => {
+        const other = chatProfileUser(chat);
+        const subtitle = chat.type === "group" ? "Группа" : other?.tag ? `@${other.tag}` : "Личный чат";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "forward-target";
+        button.dataset.userId = chat.id;
+        button.innerHTML = `
+            <span class="avatar-button small">${avatarContent(chat)}</span>
+            <span>
+                <strong>${escapeHtml(chat.title)}</strong>
+                <small>${escapeHtml(subtitle)}</small>
+            </span>
+        `;
+        els.forwardTargets.appendChild(button);
+    });
+}
+
+async function openForwardPanel(message) {
+    state.forwardingMessage = message;
+    if (!state.chats.length) await loadChats();
+    renderForwardTargets();
+    els.forwardScrim.classList.remove("hidden");
+    els.forwardPanel.classList.remove("hidden");
+}
+
+async function forwardMessageToUser(chatId) {
+    if (!state.forwardingMessage) return;
+    const result = await api(`/messages/${state.forwardingMessage.id}/forward`, {
+        method: "POST",
+        body: { targetChatId: chatId },
+    });
+    closeForwardPanel();
+    await loadChats();
+    switchView("viewChats");
+    if (result.chat?.id) await selectChat(result.chat.id);
+}
+
 function renderStickers() {
     els.stickerList.innerHTML = "";
     if (!state.stickers.length) {
@@ -772,17 +1032,122 @@ function attachmentHtml(attachment, kind, style = "") {
     return `<div class="attachment file"><a class="attachment-link" href="${downloadUrl}"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
 }
 
+function attachmentHtml(attachment, kind, style = "") {
+    const fileUrl = escapeHtml(attachment.url);
+    const downloadUrl = `${fileUrl}?download=1`;
+    const fileId = escapeHtml(attachment.id);
+
+    if (style === "sticker" && attachment.type === "image") {
+        return `<button class="attachment sticker-message" type="button" data-view-media="${fileUrl}" data-view-image="${fileUrl}" data-file-id="${fileId}"><img src="${fileUrl}" alt=""></button>`;
+    }
+
+    if (attachment.type === "image") {
+        return `<button class="attachment image image-only" type="button" data-view-media="${fileUrl}" data-view-image="${fileUrl}" data-file-id="${fileId}"><img src="${fileUrl}" alt=""></button>`;
+    }
+
+    if (attachment.type === "video") {
+        if (style === "circle" || kind === "circle") {
+            return `<div class="attachment media-attachment circle-attachment"><button class="circle-open" type="button" data-view-media="${fileUrl}" aria-label="Открыть кружок"><video class="circle-video" src="${fileUrl}" muted preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video></button><button class="cache-button mini" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+        }
+        return `<div class="attachment media-attachment"><button class="media-open" type="button" data-view-media="${fileUrl}"><video src="${fileUrl}" muted preload="metadata" playsinline webkit-playsinline data-cache-url="${fileUrl}"></video><span>Открыть видео</span></button><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+    }
+
+    if (attachment.type === "audio" || kind === "voice") {
+        return `<div class="attachment media-attachment voice-attachment"><button class="media-open audio-open" type="button" data-view-media="${fileUrl}">Открыть аудио</button><div class="media-player audio-player"><audio class="media-native" src="${fileUrl}" controls preload="metadata" playsinline data-cache-url="${fileUrl}"></audio></div><div class="attachment-tools only-cache"><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div></div>`;
+    }
+
+    return `<div class="attachment file"><a class="attachment-link" href="${downloadUrl}"><span>${escapeHtml(attachment.originalName)} · ${fileSize(attachment.size)}</span></a><button class="cache-button" type="button" data-cache-url="${fileUrl}" aria-label="Сохранить локально">${icon("download")}</button></div>`;
+}
+
 function openImageViewer(url) {
     if (!url) return;
-    els.imageViewerImg.src = url;
-    els.imageViewerScrim.classList.remove("hidden");
-    els.imageViewer.classList.remove("hidden");
+    openMediaViewer(url);
 }
 
 function closeImageViewer() {
     els.imageViewerScrim.classList.add("hidden");
     els.imageViewer.classList.add("hidden");
     els.imageViewerImg.src = "";
+    state.mediaSwipe = null;
+    state.mediaItems = [];
+    if (els.mediaViewerVideo) {
+        els.mediaViewerVideo.pause();
+        els.mediaViewerVideo.removeAttribute("src");
+        els.mediaViewerVideo.load();
+    }
+    if (els.mediaViewerAudio) {
+        els.mediaViewerAudio.pause();
+        els.mediaViewerAudio.removeAttribute("src");
+        els.mediaViewerAudio.load();
+    }
+}
+
+function mediaItemsFromMessages() {
+    return state.messages
+        .filter((message) => message.attachment && ["image", "video", "audio"].includes(message.attachment.type))
+        .map((message) => ({
+            id: message.attachment.id,
+            url: message.attachment.url,
+            type: message.attachment.type,
+            name: message.attachment.originalName || messageSnippet(message),
+            downloadUrl: `${message.attachment.url}?download=1`,
+        }));
+}
+
+function renderMediaViewer() {
+    const item = state.mediaItems[state.mediaIndex];
+    if (!item) return;
+
+    [els.imageViewerImg, els.mediaViewerVideo, els.mediaViewerAudio].forEach((node) => {
+        if (!node) return;
+        node.classList.add("hidden");
+    });
+    if (els.mediaViewerVideo) {
+        els.mediaViewerVideo.pause();
+        els.mediaViewerVideo.removeAttribute("src");
+    }
+    if (els.mediaViewerAudio) {
+        els.mediaViewerAudio.pause();
+        els.mediaViewerAudio.removeAttribute("src");
+    }
+
+    if (item.type === "image") {
+        els.imageViewerImg.src = item.url;
+        els.imageViewerImg.classList.remove("hidden");
+    } else if (item.type === "video") {
+        els.mediaViewerVideo.src = item.url;
+        els.mediaViewerVideo.classList.remove("hidden");
+    } else {
+        els.mediaViewerAudio.src = item.url;
+        els.mediaViewerAudio.classList.remove("hidden");
+    }
+
+    els.mediaViewerCaption.textContent = item.name || "";
+    els.mediaViewerDownload.href = item.downloadUrl || item.url;
+    els.mediaViewerDownload.download = item.name || "file";
+    const canMove = state.mediaItems.length > 1;
+    els.prevMediaButton.classList.toggle("hidden", !canMove);
+    els.nextMediaButton.classList.toggle("hidden", !canMove);
+}
+
+function openMediaViewer(url) {
+    state.mediaItems = mediaItemsFromMessages();
+    const index = state.mediaItems.findIndex((item) => item.url === url);
+    if (index === -1) {
+        state.mediaItems = [{ id: url, url, type: "image", name: "", downloadUrl: url }];
+        state.mediaIndex = 0;
+    } else {
+        state.mediaIndex = index;
+    }
+    renderMediaViewer();
+    els.imageViewerScrim.classList.remove("hidden");
+    els.imageViewer.classList.remove("hidden");
+}
+
+function moveMediaViewer(step) {
+    if (!state.mediaItems.length) return;
+    state.mediaIndex = (state.mediaIndex + step + state.mediaItems.length) % state.mediaItems.length;
+    renderMediaViewer();
 }
 
 function pauseOtherMedia(currentMedia) {
@@ -1067,6 +1432,37 @@ function bindCommentReplies(root, form) {
             input.focus();
         });
     });
+}
+
+function commentsHtml(comments = []) {
+    const byParent = new Map();
+    comments.forEach((comment) => {
+        const parent = comment.parentId || "root";
+        if (!byParent.has(parent)) byParent.set(parent, []);
+        byParent.get(parent).push(comment);
+    });
+
+    function renderBranch(parentId, depth = 0) {
+        const children = byParent.get(parentId) || [];
+        if (!children.length) return "";
+        return `<div class="${parentId === "root" ? "comment-tree" : "comment-children"}">` +
+            children
+                .map((comment) => `
+                    <article class="comment" data-comment-id="${escapeHtml(comment.id)}" style="--comment-depth:${Math.min(depth, 5)}">
+                        <div class="comment-head">
+                            <strong>${escapeHtml(comment.user?.name || "Пользователь")}</strong>
+                            <time>${formatTime(comment.createdAt)}</time>
+                        </div>
+                        <span>${escapeHtml(comment.text)}</span>
+                        <button class="comment-reply" type="button" data-reply-comment="${escapeHtml(comment.id)}" data-reply-name="${escapeHtml(comment.user?.name || "Пользователь")}">Ответить</button>
+                        ${renderBranch(comment.id, depth + 1)}
+                    </article>
+                `)
+                .join("") +
+            `</div>`;
+    }
+
+    return renderBranch("root");
 }
 
 function renderNews(news) {
@@ -1477,6 +1873,23 @@ els.closeForwardButton.addEventListener("click", closeForwardPanel);
 els.stickerButton.addEventListener("click", () => openStickerPanel().catch((error) => alert(error.message)));
 els.stickerScrim.addEventListener("click", closeStickerPanel);
 els.closeStickerButton.addEventListener("click", closeStickerPanel);
+els.wallpaperScrim.addEventListener("click", closeWallpaperPanel);
+els.closeWallpaperButton.addEventListener("click", closeWallpaperPanel);
+els.clearWallpaperButton.addEventListener("click", clearWallpaper);
+els.wallpaperColors.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-wallpaper-color]");
+    if (!button) return;
+    setWallpaperColor(button.dataset.wallpaperColor || "");
+});
+els.wallpaperStickerList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-wallpaper-sticker]");
+    if (!button) return;
+    toggleWallpaperSticker(button.dataset.wallpaperSticker);
+});
+els.wallpaperImage.addEventListener("change", () => {
+    setWallpaperImage(els.wallpaperImage.files[0]).catch((error) => alert(error.message));
+    els.wallpaperImage.value = "";
+});
 els.stickerList.addEventListener("click", (event) => {
     const target = event.target.closest("[data-file-id]");
     if (!target) return;
@@ -1530,14 +1943,33 @@ els.clearAttachment.addEventListener("click", () => {
 });
 els.voiceButton.addEventListener("click", () => startVoiceRecording().catch((error) => alert(error.message)));
 els.messages.addEventListener("click", (event) => {
-    const image = event.target.closest("[data-view-image]");
+    const image = event.target.closest("[data-view-media], [data-view-image]");
     if (!image) return;
     event.preventDefault();
     event.stopPropagation();
-    openImageViewer(image.dataset.viewImage);
+    openMediaViewer(image.dataset.viewMedia || image.dataset.viewImage);
 });
 els.imageViewerScrim.addEventListener("click", closeImageViewer);
 els.closeImageViewer.addEventListener("click", closeImageViewer);
+els.prevMediaButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    moveMediaViewer(-1);
+});
+els.nextMediaButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    moveMediaViewer(1);
+});
+els.imageViewer.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button, a, video, audio")) return;
+    state.mediaSwipe = { x: event.clientX, y: event.clientY };
+});
+els.imageViewer.addEventListener("pointerup", (event) => {
+    if (!state.mediaSwipe) return;
+    const dx = event.clientX - state.mediaSwipe.x;
+    const dy = Math.abs(event.clientY - state.mediaSwipe.y);
+    state.mediaSwipe = null;
+    if (Math.abs(dx) > 52 && dy < 70) moveMediaViewer(dx < 0 ? 1 : -1);
+});
 els.peopleSearchButton.addEventListener("click", async () => {
     await loadUsers(els.peopleSearch.value);
     renderPeople();
@@ -1557,7 +1989,10 @@ document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !els.groupForm.classList.contains("hidden")) closeGroupForm();
     if (event.key === "Escape" && !els.messageActionSheet.classList.contains("hidden")) closeMessageActions();
     if (event.key === "Escape" && !els.forwardPanel.classList.contains("hidden")) closeForwardPanel();
+    if (event.key === "Escape" && !els.wallpaperPanel.classList.contains("hidden")) closeWallpaperPanel();
     if (event.key === "Escape" && !els.imageViewer.classList.contains("hidden")) closeImageViewer();
+    if (!els.imageViewer.classList.contains("hidden") && event.key === "ArrowLeft") moveMediaViewer(-1);
+    if (!els.imageViewer.classList.contains("hidden") && event.key === "ArrowRight") moveMediaViewer(1);
 });
 
 socket.on("connect_error", () => {
@@ -1629,6 +2064,7 @@ socket.on("userUnbanned", () => {
 (async function init() {
     try {
         setupStaticIcons();
+        bindWallpaperBackgroundPress();
         if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
         await loadMe();
         await loadUsers();

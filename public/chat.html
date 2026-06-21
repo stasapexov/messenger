@@ -199,10 +199,35 @@
             <div id="stickerList" class="sticker-list"></div>
         </div>
 
+        <div class="modal-scrim hidden" id="wallpaperScrim"></div>
+        <div class="forward-panel hidden" id="wallpaperPanel">
+            <div class="group-panel-head">
+                <div>
+                    <strong>Обои чата</strong>
+                    <span>Цвет, картинка или стикеры на фоне</span>
+                </div>
+                <button class="icon-button" type="button" id="closeWallpaperButton" aria-label="Закрыть">×</button>
+            </div>
+            <div class="wallpaper-colors" id="wallpaperColors"></div>
+            <div class="wallpaper-actions">
+                <label class="ghost-button wallpaper-file-button" for="wallpaperImage">Картинка</label>
+                <input type="file" id="wallpaperImage" accept="image/*" hidden>
+                <button class="ghost-button" type="button" id="clearWallpaperButton">Сбросить</button>
+            </div>
+            <div class="wallpaper-sticker-title">Стикеры на фон</div>
+            <div id="wallpaperStickerList" class="sticker-list wallpaper-sticker-list"></div>
+        </div>
+
         <div class="modal-scrim hidden" id="imageViewerScrim"></div>
-        <div class="image-viewer hidden" id="imageViewer">
+        <div class="media-viewer hidden" id="imageViewer">
             <button class="icon-button" type="button" id="closeImageViewer" aria-label="Закрыть">×</button>
             <img id="imageViewerImg" alt="">
+            <video class="hidden" id="mediaViewerVideo" controls playsinline webkit-playsinline></video>
+            <audio class="hidden" id="mediaViewerAudio" controls></audio>
+            <button class="icon-button media-nav prev" type="button" id="prevMediaButton" aria-label="Предыдущее">‹</button>
+            <button class="icon-button media-nav next" type="button" id="nextMediaButton" aria-label="Следующее">›</button>
+            <div class="media-viewer-caption" id="mediaViewerCaption"></div>
+            <a class="media-download" id="mediaViewerDownload" href="#" download>Скачать</a>
         </div>
     </div>
 
